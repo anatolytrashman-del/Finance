@@ -165,37 +165,32 @@ total_market = market.sum(skipna=True)
 total_liabilities = liabilities.sum(skipna=True)
 total_growth = (total_market - total_purchase) / total_purchase * 100 if total_purchase else None
 
-totals_row = {c: "" for c in display.columns}
-if TYPE_COL in totals_row:
-    totals_row[TYPE_COL] = "ИТОГО"
-if AREA_COL in totals_row:
-    totals_row[AREA_COL] = area_summary
-if PURCHASE_COL in totals_row:
-    totals_row[PURCHASE_COL] = _fmt_money(total_purchase)
-if MARKET_COL in totals_row:
-    totals_row[MARKET_COL] = _fmt_money(total_market)
-if LIABILITIES_COL in totals_row:
-    totals_row[LIABILITIES_COL] = _fmt_money(total_liabilities)
-totals_row[GROWTH_COL] = f"{total_growth:+.1f}%" if total_growth is not None else "—"
-
-total_paid_pct = float("nan")
+total_paid_pct = None
 if total_purchase:
     total_paid_pct = max(0.0, min(100.0, (total_purchase - abs(total_liabilities)) / total_purchase * 100))
-totals_row[PAID_COL] = total_paid_pct
-
-display_with_totals = pd.concat([display, pd.DataFrame([totals_row])], ignore_index=True)
 
 st.caption(f"Объектов: {len(df)}")
 
-# Сначала общая таблица
+# Сначала общая таблица (объекты в порядке из исходной таблицы, без строки ИТОГО —
+# иначе при сортировке по столбцу она уезжает в середину)
 st.dataframe(
-    display_with_totals,
+    display,
     width="stretch",
     hide_index=True,
     column_config={
         PAID_COL: st.column_config.ProgressColumn("Оплачено", format="%.0f%%", min_value=0, max_value=100)
     },
 )
+
+# Итоги по портфелю — отдельным блоком под таблицей
+st.markdown("**Итого по портфелю**")
+st.caption(f"Площадь: {area_summary}")
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("Потрачено", _fmt_money(total_purchase))
+m2.metric("Рыночная стоимость", _fmt_money(total_market))
+m3.metric("Обязательства", _fmt_money(total_liabilities))
+m4.metric("Прирост", f"{total_growth:+.1f}%" if total_growth is not None else "—")
+m5.metric("Оплачено", f"{total_paid_pct:.0f}%" if total_paid_pct is not None else "—")
 
 # Затем карта
 st.subheader("Карта объектов")
@@ -254,19 +249,18 @@ if not sold.empty:
     scols.insert(s_insert, YIELD_COL)
     sdisp = sdisp[scols]
 
-    # Итоговая строка
     st_purchase = s_purchase.sum(skipna=True)
     st_sale = s_sale.sum(skipna=True)
     st_profit = s_profit.sum(skipna=True)
     st_yield = st_profit / st_purchase * 100 if st_purchase else None
-    s_totals = {c: "" for c in sdisp.columns}
-    s_totals[TYPE_COL] = "ИТОГО"
-    s_totals[PURCHASE_COL] = _fmt_money(st_purchase)
-    s_totals[SALE_COL] = _fmt_money(st_sale)
-    s_totals[PROFIT_COL] = _fmt_money(st_profit)
-    s_totals[YIELD_COL] = f"{st_yield:+.1f}%" if st_yield is not None else "—"
-    sdisp_totals = pd.concat([sdisp, pd.DataFrame([s_totals])], ignore_index=True)
 
     st.divider()
     st.subheader("💰 Проданные объекты")
-    st.dataframe(sdisp_totals, width="stretch", hide_index=True)
+    st.dataframe(sdisp, width="stretch", hide_index=True)
+
+    st.markdown("**Итого по продажам**")
+    sm1, sm2, sm3, sm4 = st.columns(4)
+    sm1.metric("Потрачено", _fmt_money(st_purchase))
+    sm2.metric("Выручка", _fmt_money(st_sale))
+    sm3.metric("Прибыль", _fmt_money(st_profit))
+    sm4.metric("Доходность", f"{st_yield:+.1f}%" if st_yield is not None else "—")
