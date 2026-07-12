@@ -127,4 +127,6 @@ for _, row in df.iterrows():
         for col in df.columns:
             value = row.get(col)
             if value is not None and str(value).strip() not in ("", "None", "nan"):
-                st.write(f"**{col}:** {value}")
+                safe_col = str(col).replace("$", r"\$")
+                safe_value = str(value).replace("$", r"\$")
+                st.write(f"**{safe_col}:** {safe_value}")
