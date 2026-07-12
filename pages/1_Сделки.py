@@ -42,7 +42,7 @@ if DEAL_TYPE_COL in df.columns and "Дата" in df.columns and "Сумма" in 
             margin=dict(l=10, r=10, t=10, b=10),
             height=320,
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 col1, col2, col3 = st.columns(3)
 with col1:

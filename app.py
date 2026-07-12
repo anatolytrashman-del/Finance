@@ -30,7 +30,7 @@ def line_chart(df, y_label, color):
         margin=dict(l=10, r=10, t=10, b=10),
         height=320,
     )
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, use_container_width=True)
 
 
 col1, col2 = st.columns(2)
@@ -69,4 +69,4 @@ with col4:
             margin=dict(l=10, r=10, t=10, b=10),
             height=320,
         )
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
