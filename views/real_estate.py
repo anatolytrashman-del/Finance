@@ -1,6 +1,10 @@
+import json
+import re
+
 import pandas as pd
 import streamlit as st
 
+from config import YANDEX_MAPS_API_KEY
 from data_source import get_workbook, sidebar_refresh_control
 from parsers import parse_area, parse_money, parse_real_estate
 
@@ -26,6 +30,80 @@ MARKET_COL = "Примерная рыночная стоимость в $"
 LIABILITIES_COL = "Обязательства"
 GROWTH_COL = "% прироста"
 PAID_COL = "Оплачено %"
+
+
+COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
+
+
+def _build_map_objects(df):
+    objects = []
+    for _, row in df.iterrows():
+        addr_raw = str(row.get("Точный адрес") or "").strip()
+        location = str(row.get("Локация") or "").strip()
+        coords_match = COORDS_RE.match(addr_raw)
+        coords = None
+        address_query = None
+        if coords_match:
+            coords = [float(coords_match.group(1)), float(coords_match.group(2))]
+        else:
+            address_query = ", ".join(p for p in [location, addr_raw] if p)
+            if not address_query:
+                continue
+        info_parts = [p for p in [location, addr_raw, str(row.get("Статус") or "").strip()] if p]
+        objects.append(
+            {
+                "title": str(row.get("Тип") or "Объект"),
+                "address": address_query,
+                "coords": coords,
+                "info": "<br>".join(info_parts),
+            }
+        )
+    return objects
+
+
+def _build_map_html(objects, api_key):
+    data_json = json.dumps(objects, ensure_ascii=False)
+    return f"""
+<div id="realty-map" style="width:100%;height:520px;border-radius:8px;overflow:hidden;"></div>
+<script src="https://api-maps.yandex.ru/2.1/?apikey={api_key}&lang=ru_RU"></script>
+<script>
+  var objects = {data_json};
+  ymaps.ready(function () {{
+    var map = new ymaps.Map("realty-map", {{
+      center: [53.9, 27.5667],
+      zoom: 10,
+      controls: ["zoomControl", "fullscreenControl"]
+    }});
+
+    var geoPromises = objects.map(function (obj) {{
+      if (obj.coords) {{
+        return Promise.resolve(obj.coords);
+      }}
+      return ymaps.geocode(obj.address, {{results: 1}}).then(function (res) {{
+        var first = res.geoObjects.get(0);
+        return first ? first.geometry.getCoordinates() : null;
+      }}).catch(function () {{ return null; }});
+    }});
+
+    Promise.all(geoPromises).then(function (coordsList) {{
+      coordsList.forEach(function (coords, i) {{
+        if (!coords) return;
+        var obj = objects[i];
+        var placemark = new ymaps.Placemark(coords, {{
+          balloonContentHeader: obj.title,
+          balloonContentBody: obj.info
+        }}, {{
+          preset: "islands#blueHomeIcon"
+        }});
+        map.geoObjects.add(placemark);
+      }});
+      if (map.geoObjects.getLength() > 0) {{
+        map.setBounds(map.geoObjects.getBounds(), {{checkZoomRange: true, zoomMargin: 40}});
+      }}
+    }});
+  }});
+</script>
+"""
 
 
 def _fmt_money(v):
@@ -111,6 +189,11 @@ totals_row[PAID_COL] = total_paid_pct
 display_with_totals = pd.concat([display, pd.DataFrame([totals_row])], ignore_index=True)
 
 st.caption(f"Объектов: {len(df)}")
+
+map_objects = _build_map_objects(df)
+if map_objects and YANDEX_MAPS_API_KEY:
+    st.components.v1.html(_build_map_html(map_objects, YANDEX_MAPS_API_KEY), height=530)
+
 st.dataframe(
     display_with_totals,
     width="stretch",
