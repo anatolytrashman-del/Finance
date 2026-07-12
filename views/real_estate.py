@@ -37,8 +37,12 @@ COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
 def _build_map_objects(df):
-    """Строит метки карты из технической колонки COORDS_COL (формат 'lat, lon')."""
-    objects, missing = [], []
+    """Строит метки карты из технической колонки COORDS_COL (формат 'lat, lon').
+
+    Объекты с одинаковыми координатами (например, несколько объектов в одном доме)
+    объединяются в одну метку со списком внутри."""
+    missing = []
+    groups = {}
     for _, row in df.iterrows():
         title = str(row.get("Тип") or "Объект")
         location = str(row.get("Локация") or "").strip()
@@ -47,13 +51,23 @@ def _build_map_objects(df):
         if not match:
             missing.append(f"{title} — {location or 'без локации'}")
             continue
-        coords = [float(match.group(1)), float(match.group(2))]
-        info_parts = [
-            p
-            for p in [location, str(row.get("Точный адрес") or "").strip(), str(row.get("Статус") or "").strip()]
-            if p
-        ]
-        objects.append({"title": title, "coords": coords, "info": "<br>".join(info_parts)})
+        key = (round(float(match.group(1)), 6), round(float(match.group(2)), 6))
+        status = str(row.get("Статус") or "").strip()
+        address = str(row.get("Точный адрес") or "").strip()
+        group = groups.setdefault(key, {"location": location, "address": address, "items": []})
+        group["items"].append({"title": title, "status": status})
+
+    objects = []
+    for (lat, lon), group in groups.items():
+        items = group["items"]
+        header = items[0]["title"] if len(items) == 1 else f"{len(items)} объекта на одном адресе"
+        lines = [p for p in [group["location"], group["address"]] if p]
+        for item in items:
+            line = f"<b>{item['title']}</b>"
+            if item["status"]:
+                line += f" — {item['status']}"
+            lines.append(line)
+        objects.append({"title": header, "coords": [lat, lon], "info": "<br>".join(lines)})
     return objects, missing
 
 
