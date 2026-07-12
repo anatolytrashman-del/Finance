@@ -200,10 +200,13 @@ cols.insert(insert_at, GROWTH_COL)
 cols.insert(insert_at + 1, PAID_COL)
 display = display[cols]
 
-# Итоговая строка
-areas = df[AREA_COL].apply(parse_area) if AREA_COL in df.columns else pd.Series(dtype=object)
-total_hectares = sum(a["value"] for a in areas if a and a["unit"] == "Га")
-total_concrete = sum(a["value"] for a in areas if a and a["unit"] == "м²")
+# Итоговая площадь: для долевых объектов учитываем только свою долю площади
+total_hectares = sum(
+    a["value"] * s for a, s in zip(area_info_series, share_series) if a and a["unit"] == "Га"
+)
+total_concrete = sum(
+    a["value"] * s for a, s in zip(area_info_series, share_series) if a and a["unit"] == "м²"
+)
 area_parts = []
 if total_hectares > 0:
     area_parts.append(f"{total_hectares:.1f} Га земли")
