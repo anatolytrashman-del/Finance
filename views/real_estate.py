@@ -110,14 +110,34 @@ def _fmt_money(v):
     return f"{sign}${abs(v):,.0f}".replace(",", " ")
 
 
-def _price_per_unit(price, area_info):
-    """Цена за м² (или за сотку для земли в Га; 1 сотка = 100 м²)."""
+SHARE_RE = re.compile(r"доля\s*(\d+(?:[.,]\d+)?)\s*%", re.IGNORECASE)
+
+
+def _share_fraction(type_str):
+    """Доля владения из названия: 'доля 50%' -> 0.5. Для объекта целиком -> 1.0."""
+    if isinstance(type_str, str):
+        match = SHARE_RE.search(type_str)
+        if match:
+            pct = float(match.group(1).replace(",", "."))
+            if 0 < pct < 100:
+                return pct / 100
+    return 1.0
+
+
+def _price_per_unit(price, area_info, share=1.0):
+    """Цена за м² (или за сотку для земли в Га; 1 сотка = 100 м²).
+
+    Для долевых объектов цена относится к доле, а площадь указана полная,
+    поэтому делим на площадь доли (area * share)."""
     if pd.isna(price) or not area_info or not area_info.get("value"):
         return "—"
+    area_value = area_info["value"] * share
+    if area_value <= 0:
+        return "—"
     if area_info["unit"] == "Га":
-        per = price / (area_info["value"] * 100)
+        per = price / (area_value * 100)
         return f"${per:,.0f}/сот".replace(",", " ")
-    per = price / area_info["value"]
+    per = price / area_value
     return f"${per:,.0f}/м²".replace(",", " ")
 
 
@@ -156,8 +176,13 @@ paid_pct = ((purchase - liabilities.abs()) / purchase.replace(0, pd.NA) * 100).c
 display[PAID_COL] = paid_pct
 
 area_info_series = df[AREA_COL].apply(parse_area) if AREA_COL in df.columns else pd.Series([None] * len(df))
-display[PRICE_PER_UNIT_COL] = [_price_per_unit(p, a) for p, a in zip(purchase, area_info_series)]
-display[CURRENT_PRICE_PER_UNIT_COL] = [_price_per_unit(m, a) for m, a in zip(market, area_info_series)]
+share_series = df[TYPE_COL].apply(_share_fraction) if TYPE_COL in df.columns else pd.Series([1.0] * len(df))
+display[PRICE_PER_UNIT_COL] = [
+    _price_per_unit(p, a, s) for p, a, s in zip(purchase, area_info_series, share_series)
+]
+display[CURRENT_PRICE_PER_UNIT_COL] = [
+    _price_per_unit(m, a, s) for m, a, s in zip(market, area_info_series, share_series)
+]
 
 # "Цена за метр"/"Текущая цена метра" — после "Площадь"; "% прироста"/"Оплачено %" — после "Обязательства"
 cols = [
