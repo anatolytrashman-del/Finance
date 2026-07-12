@@ -25,6 +25,7 @@ PURCHASE_COL = "Сумма покупки в $"
 MARKET_COL = "Примерная рыночная стоимость в $"
 LIABILITIES_COL = "Обязательства"
 GROWTH_COL = "% прироста"
+PAID_COL = "Оплачено %"
 
 
 def _fmt_money(v):
@@ -63,10 +64,14 @@ if LIABILITIES_COL in display.columns:
     display[LIABILITIES_COL] = liabilities.apply(_fmt_money)
 display[GROWTH_COL] = growth_pct.apply(lambda v: f"{v:+.1f}%" if pd.notna(v) else "—")
 
-# Столбец % прироста сразу после "Обязательства"
-cols = [c for c in display.columns if c != GROWTH_COL]
+paid_pct = ((purchase - liabilities.abs()) / purchase.replace(0, pd.NA) * 100).clip(lower=0, upper=100)
+display[PAID_COL] = paid_pct
+
+# Столбцы "% прироста" и "Оплачено %" сразу после "Обязательства"
+cols = [c for c in display.columns if c not in (GROWTH_COL, PAID_COL)]
 insert_at = cols.index(LIABILITIES_COL) + 1 if LIABILITIES_COL in cols else len(cols)
 cols.insert(insert_at, GROWTH_COL)
+cols.insert(insert_at + 1, PAID_COL)
 display = display[cols]
 
 # Итоговая строка
@@ -98,10 +103,22 @@ if LIABILITIES_COL in totals_row:
     totals_row[LIABILITIES_COL] = _fmt_money(total_liabilities)
 totals_row[GROWTH_COL] = f"{total_growth:+.1f}%" if total_growth is not None else "—"
 
+total_paid_pct = float("nan")
+if total_purchase:
+    total_paid_pct = max(0.0, min(100.0, (total_purchase - abs(total_liabilities)) / total_purchase * 100))
+totals_row[PAID_COL] = total_paid_pct
+
 display_with_totals = pd.concat([display, pd.DataFrame([totals_row])], ignore_index=True)
 
 st.caption(f"Объектов: {len(df)}")
-st.dataframe(display_with_totals, width="stretch", hide_index=True)
+st.dataframe(
+    display_with_totals,
+    width="stretch",
+    hide_index=True,
+    column_config={
+        PAID_COL: st.column_config.ProgressColumn("Оплачено", format="%.0f%%", min_value=0, max_value=100)
+    },
+)
 
 for _, row in df.iterrows():
     title = row.get(TYPE_COL, "Объект")

@@ -205,3 +205,34 @@ with col7:
 with col8:
     st.subheader("Пассивный доход, $")
     line_chart(data.get("passive_income"), "USD", "#6A1B9A")
+
+st.subheader("Доля пассивного дохода, %")
+st.caption("Пассивный доход / (активный + пассивный) × 100 — прогресс к финансовой независимости")
+active_income = data.get("active_income", pd.DataFrame())
+passive_income = data.get("passive_income", pd.DataFrame())
+if not active_income.empty and not passive_income.empty:
+    merged_income = pd.merge(
+        active_income.assign(ym=active_income["date"].dt.to_period("M")),
+        passive_income.assign(ym=passive_income["date"].dt.to_period("M")),
+        on="ym",
+        suffixes=("_active", "_passive"),
+    )
+    total = merged_income["value_active"] + merged_income["value_passive"]
+    merged_income = merged_income[total > 0].copy()
+    if merged_income.empty:
+        st.warning("Нет месяцев с ненулевым доходом для расчёта.")
+    else:
+        merged_income["Доля пассивного, %"] = (
+            merged_income["value_passive"] / (merged_income["value_active"] + merged_income["value_passive"]) * 100
+        )
+        fig = px.line(merged_income, x="date_active", y="Доля пассивного, %", markers=True)
+        fig.update_traces(line_color="#00897B")
+        fig.update_layout(
+            xaxis_title=None,
+            yaxis_title="%",
+            margin=dict(l=10, r=10, t=10, b=10),
+            height=320,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("Нет данных для отображения.")
