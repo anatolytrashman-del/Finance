@@ -2,9 +2,10 @@ import json
 import re
 
 import pandas as pd
+import requests
 import streamlit as st
 
-from config import YANDEX_MAPS_API_KEY
+from config import YANDEX_GEOCODER_API_KEY, YANDEX_MAPS_API_KEY
 from data_source import get_workbook, sidebar_refresh_control
 from parsers import parse_area, parse_money, parse_real_estate
 
@@ -35,30 +36,52 @@ PAID_COL = "Оплачено %"
 COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
-def _build_map_objects(df):
-    objects = []
+@st.cache_data(show_spinner=False)
+def _geocode_address(address: str, api_key: str):
+    """Возвращает [lat, lon] через HTTP Geocoder API Яндекса или None, если не нашёл."""
+    try:
+        resp = requests.get(
+            "https://geocode-maps.yandex.ru/1.x/",
+            params={
+                "apikey": api_key,
+                "format": "json",
+                "geocode": address,
+                "lang": "ru_RU",
+                "results": 1,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        members = resp.json()["response"]["GeoObjectCollection"]["featureMember"]
+        if not members:
+            return None
+        pos = members[0]["GeoObject"]["Point"]["pos"]  # "lon lat"
+        lon_str, lat_str = pos.split()
+        return [float(lat_str), float(lon_str)]
+    except Exception:
+        return None
+
+
+def _build_map_objects(df, geocoder_key):
+    objects, failed = [], []
     for _, row in df.iterrows():
         addr_raw = str(row.get("Точный адрес") or "").strip()
         location = str(row.get("Локация") or "").strip()
+        title = str(row.get("Тип") or "Объект")
         coords_match = COORDS_RE.match(addr_raw)
-        coords = None
-        address_query = None
+        query = ", ".join(p for p in [location, addr_raw] if p)
         if coords_match:
             coords = [float(coords_match.group(1)), float(coords_match.group(2))]
+        elif query and geocoder_key:
+            coords = _geocode_address(query, geocoder_key)
         else:
-            address_query = ", ".join(p for p in [location, addr_raw] if p)
-            if not address_query:
-                continue
+            coords = None
+        if coords is None:
+            failed.append(f"{title} — {query or 'адрес не указан'}")
+            continue
         info_parts = [p for p in [location, addr_raw, str(row.get("Статус") or "").strip()] if p]
-        objects.append(
-            {
-                "title": str(row.get("Тип") or "Объект"),
-                "address": address_query,
-                "coords": coords,
-                "info": "<br>".join(info_parts),
-            }
-        )
-    return objects
+        objects.append({"title": title, "coords": coords, "info": "<br>".join(info_parts)})
+    return objects, failed
 
 
 def _build_map_html(objects, api_key):
@@ -74,33 +97,18 @@ def _build_map_html(objects, api_key):
       zoom: 10,
       controls: ["zoomControl", "fullscreenControl"]
     }});
-
-    var geoPromises = objects.map(function (obj) {{
-      if (obj.coords) {{
-        return Promise.resolve(obj.coords);
-      }}
-      return ymaps.geocode(obj.address, {{results: 1}}).then(function (res) {{
-        var first = res.geoObjects.get(0);
-        return first ? first.geometry.getCoordinates() : null;
-      }}).catch(function () {{ return null; }});
-    }});
-
-    Promise.all(geoPromises).then(function (coordsList) {{
-      coordsList.forEach(function (coords, i) {{
-        if (!coords) return;
-        var obj = objects[i];
-        var placemark = new ymaps.Placemark(coords, {{
-          balloonContentHeader: obj.title,
-          balloonContentBody: obj.info
-        }}, {{
-          preset: "islands#blueHomeIcon"
-        }});
-        map.geoObjects.add(placemark);
+    objects.forEach(function (obj) {{
+      var placemark = new ymaps.Placemark(obj.coords, {{
+        balloonContentHeader: obj.title,
+        balloonContentBody: obj.info
+      }}, {{
+        preset: "islands#blueHomeIcon"
       }});
-      if (map.geoObjects.getLength() > 0) {{
-        map.setBounds(map.geoObjects.getBounds(), {{checkZoomRange: true, zoomMargin: 40}});
-      }}
+      map.geoObjects.add(placemark);
     }});
+    if (map.geoObjects.getLength() > 0) {{
+      map.setBounds(map.geoObjects.getBounds(), {{checkZoomRange: true, zoomMargin: 40}});
+    }}
   }});
 </script>
 """
@@ -190,9 +198,11 @@ display_with_totals = pd.concat([display, pd.DataFrame([totals_row])], ignore_in
 
 st.caption(f"Объектов: {len(df)}")
 
-map_objects = _build_map_objects(df)
+map_objects, failed_addresses = _build_map_objects(df, YANDEX_GEOCODER_API_KEY)
 if map_objects and YANDEX_MAPS_API_KEY:
     st.components.v1.html(_build_map_html(map_objects, YANDEX_MAPS_API_KEY), height=530)
+if failed_addresses:
+    st.warning("Не нашёл на карте:\n" + "\n".join(f"- {a}" for a in failed_addresses))
 
 st.dataframe(
     display_with_totals,
