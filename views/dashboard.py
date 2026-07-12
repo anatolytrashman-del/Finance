@@ -59,8 +59,19 @@ def capital_stats(df):
     return stats
 
 
-def fmt_pct(v):
-    return f"{v:+.1f}%" if v is not None else None
+def render_delta_line(label, delta_str, pct):
+    if delta_str is None:
+        st.caption(f"{label}: недостаточно данных")
+        return
+    positive = pct is None or pct >= 0
+    color = "#16a34a" if positive else "#dc2626"
+    arrow = "↑" if positive else "↓"
+    pct_part = f" {arrow} {abs(pct):.1f}%" if pct is not None else ""
+    st.markdown(
+        f"<div style='font-size:0.875rem;'>{label}: "
+        f"<span style='color:{color};font-weight:600'>{delta_str}{pct_part}</span></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_capital_kpi(label, df, fmt_value, fmt_delta):
@@ -70,15 +81,17 @@ def render_capital_kpi(label, df, fmt_value, fmt_delta):
     st.metric(label, fmt_value(stats["latest"]))
     sub1, sub2 = st.columns(2)
     with sub1:
-        if stats["month_delta"] is not None:
-            st.metric("За месяц", fmt_delta(stats["month_delta"]), delta=fmt_pct(stats["month_pct"]))
-        else:
-            st.caption("За месяц: недостаточно данных")
+        render_delta_line(
+            "За месяц",
+            fmt_delta(stats["month_delta"]) if stats["month_delta"] is not None else None,
+            stats["month_pct"],
+        )
     with sub2:
-        if stats["year_delta"] is not None:
-            st.metric("За год", fmt_delta(stats["year_delta"]), delta=fmt_pct(stats["year_pct"]))
-        else:
-            st.caption("За год: недостаточно данных")
+        render_delta_line(
+            "За год",
+            fmt_delta(stats["year_delta"]) if stats["year_delta"] is not None else None,
+            stats["year_pct"],
+        )
 
 
 def fmt_usd(v):
