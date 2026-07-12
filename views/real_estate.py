@@ -6,7 +6,7 @@ import streamlit as st
 
 from config import YANDEX_MAPS_API_KEY
 from data_source import get_workbook, sidebar_refresh_control
-from parsers import parse_area, parse_money, parse_real_estate
+from parsers import parse_area, parse_money, parse_real_estate, parse_real_estate_sold
 
 sidebar_refresh_control()
 
@@ -187,15 +187,7 @@ display_with_totals = pd.concat([display, pd.DataFrame([totals_row])], ignore_in
 
 st.caption(f"Объектов: {len(df)}")
 
-map_objects, missing_coords = _build_map_objects(df)
-if map_objects and YANDEX_MAPS_API_KEY:
-    st.components.v1.html(_build_map_html(map_objects, YANDEX_MAPS_API_KEY), height=530)
-if missing_coords:
-    st.warning(
-        "Нет координат (заполни столбец «Координаты» в формате lat, lon):\n"
-        + "\n".join(f"- {a}" for a in missing_coords)
-    )
-
+# Сначала общая таблица
 st.dataframe(
     display_with_totals,
     width="stretch",
@@ -204,6 +196,17 @@ st.dataframe(
         PAID_COL: st.column_config.ProgressColumn("Оплачено", format="%.0f%%", min_value=0, max_value=100)
     },
 )
+
+# Затем карта
+st.subheader("Карта объектов")
+map_objects, missing_coords = _build_map_objects(df)
+if map_objects and YANDEX_MAPS_API_KEY:
+    st.components.v1.html(_build_map_html(map_objects, YANDEX_MAPS_API_KEY), height=530)
+if missing_coords:
+    st.warning(
+        "Нет координат (заполни столбец «Координаты» в формате lat, lon):\n"
+        + "\n".join(f"- {a}" for a in missing_coords)
+    )
 
 for _, row in df.iterrows():
     title = row.get(TYPE_COL, "Объект")
@@ -217,3 +220,53 @@ for _, row in df.iterrows():
                 safe_col = str(col).replace("$", r"\$")
                 safe_value = str(value).replace("$", r"\$")
                 st.write(f"**{safe_col}:** {safe_value}")
+
+# Проданные объекты — внизу страницы
+sold = parse_real_estate_sold(wb)
+if not sold.empty:
+    SALE_COL = "Цена продажи"
+    PROFIT_COL = "Прибыль"
+    YIELD_COL = "Доходность"
+
+    s_purchase = sold[PURCHASE_COL].apply(parse_money) if PURCHASE_COL in sold.columns else pd.Series(dtype=float)
+    s_sale = sold[SALE_COL].apply(parse_money) if SALE_COL in sold.columns else pd.Series(dtype=float)
+    s_profit = sold[PROFIT_COL].apply(parse_money) if PROFIT_COL in sold.columns else pd.Series(dtype=float)
+    s_yield = s_profit / s_purchase.replace(0, pd.NA) * 100
+
+    sdisp = sold.copy()
+    if COORDS_COL in sdisp.columns:
+        sdisp = sdisp.drop(columns=[COORDS_COL])
+    money_cols = {PURCHASE_COL, SALE_COL, PROFIT_COL}
+    for col in sdisp.columns:
+        if col not in money_cols:
+            sdisp[col] = sdisp[col].apply(_fmt_plain)
+    if PURCHASE_COL in sdisp.columns:
+        sdisp[PURCHASE_COL] = s_purchase.apply(_fmt_money)
+    if SALE_COL in sdisp.columns:
+        sdisp[SALE_COL] = s_sale.apply(_fmt_money)
+    if PROFIT_COL in sdisp.columns:
+        sdisp[PROFIT_COL] = s_profit.apply(_fmt_money)
+    sdisp[YIELD_COL] = s_yield.apply(lambda v: f"{v:+.1f}%" if pd.notna(v) else "—")
+
+    # Доходность сразу после "Прибыль"
+    scols = [c for c in sdisp.columns if c != YIELD_COL]
+    s_insert = scols.index(PROFIT_COL) + 1 if PROFIT_COL in scols else len(scols)
+    scols.insert(s_insert, YIELD_COL)
+    sdisp = sdisp[scols]
+
+    # Итоговая строка
+    st_purchase = s_purchase.sum(skipna=True)
+    st_sale = s_sale.sum(skipna=True)
+    st_profit = s_profit.sum(skipna=True)
+    st_yield = st_profit / st_purchase * 100 if st_purchase else None
+    s_totals = {c: "" for c in sdisp.columns}
+    s_totals[TYPE_COL] = "ИТОГО"
+    s_totals[PURCHASE_COL] = _fmt_money(st_purchase)
+    s_totals[SALE_COL] = _fmt_money(st_sale)
+    s_totals[PROFIT_COL] = _fmt_money(st_profit)
+    s_totals[YIELD_COL] = f"{st_yield:+.1f}%" if st_yield is not None else "—"
+    sdisp_totals = pd.concat([sdisp, pd.DataFrame([s_totals])], ignore_index=True)
+
+    st.divider()
+    st.subheader("💰 Проданные объекты")
+    st.dataframe(sdisp_totals, width="stretch", hide_index=True)

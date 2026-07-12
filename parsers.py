@@ -48,13 +48,7 @@ def parse_progress(wb) -> dict:
     }
 
 
-def _sheet_to_df(ws) -> pd.DataFrame:
-    headers = [c.value for c in ws[1]]
-    rows = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if all(v is None for v in row):
-            continue
-        rows.append(row)
+def _rows_to_df(headers, rows) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=headers)
     named_cols = [c for c in df.columns if pd.notna(c) and str(c).strip() != ""]
     df = df.loc[:, named_cols]
@@ -62,6 +56,16 @@ def _sheet_to_df(ws) -> pd.DataFrame:
     for col in df.columns:
         df[col] = df[col].apply(lambda v: v.strip() if isinstance(v, str) else v)
     return df
+
+
+def _sheet_to_df(ws) -> pd.DataFrame:
+    headers = [c.value for c in ws[1]]
+    rows = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if all(v is None for v in row):
+            continue
+        rows.append(row)
+    return _rows_to_df(headers, rows)
 
 
 def parse_deals(wb) -> pd.DataFrame:
@@ -75,11 +79,57 @@ def parse_deals(wb) -> pd.DataFrame:
     return df
 
 
+SOLD_MARKER = "проданные"
+
+
+def _split_real_estate_rows(ws):
+    """Делит лист на активные и проданные объекты по строке-маркеру 'Проданные объекты:'.
+
+    Возвращает (headers, active_rows, sold_headers, sold_rows). sold_headers — заголовки
+    из строки-маркера, где столбцы могут переопределяться (напр. 'Цена продажи', 'Прибыль')."""
+    headers = [c.value for c in ws[1]]
+    active_rows, sold_rows = [], []
+    sold_headers = None
+    in_sold = False
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        first = row[0]
+        if isinstance(first, str) and SOLD_MARKER in first.strip().lower():
+            in_sold = True
+            sold_headers = list(row)
+            continue
+        if all(v is None for v in row):
+            continue
+        (sold_rows if in_sold else active_rows).append(row)
+    return headers, active_rows, sold_headers, sold_rows
+
+
 def parse_real_estate(wb) -> pd.DataFrame:
     ws = _find_sheet(wb, REAL_ESTATE_SHEET)
     if ws is None:
         return pd.DataFrame()
-    df = _sheet_to_df(ws)
+    headers, active_rows, _, _ = _split_real_estate_rows(ws)
+    df = _rows_to_df(headers, active_rows)
+    if "Тип" in df.columns:
+        df = df.dropna(subset=["Тип"])
+    return df.reset_index(drop=True)
+
+
+def parse_real_estate_sold(wb) -> pd.DataFrame:
+    """Проданные объекты (секция ниже маркера). Столбцы H/I переименованы в
+    'Цена продажи'/'Прибыль' согласно строке-маркеру."""
+    ws = _find_sheet(wb, REAL_ESTATE_SHEET)
+    if ws is None:
+        return pd.DataFrame()
+    headers, _, sold_headers, sold_rows = _split_real_estate_rows(ws)
+    if not sold_rows:
+        return pd.DataFrame()
+    merged = list(headers)
+    if sold_headers:
+        for i in range(1, min(len(sold_headers), len(merged))):
+            val = sold_headers[i]
+            if val is not None and str(val).strip():
+                merged[i] = str(val).strip()
+    df = _rows_to_df(merged, sold_rows)
     if "Тип" in df.columns:
         df = df.dropna(subset=["Тип"])
     return df.reset_index(drop=True)
