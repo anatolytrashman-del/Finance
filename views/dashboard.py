@@ -35,30 +35,75 @@ def line_chart(df, y_label, color):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def latest_and_delta(df):
+def capital_stats(df):
+    """Последнее значение + изменение за месяц и за год (сумма и %)."""
     if df is None or df.empty:
-        return None, None
-    latest = df.iloc[-1]["value"]
-    delta = df.iloc[-1]["value"] - df.iloc[-2]["value"] if len(df) > 1 else None
-    return latest, delta
+        return None
+    latest_row = df.iloc[-1]
+    latest_val, latest_date = latest_row["value"], latest_row["date"]
+    stats = {"latest": latest_val, "month_delta": None, "month_pct": None, "year_delta": None, "year_pct": None}
+
+    if len(df) > 1:
+        prev_val = df.iloc[-2]["value"]
+        stats["month_delta"] = latest_val - prev_val
+        if prev_val:
+            stats["month_pct"] = (latest_val - prev_val) / abs(prev_val) * 100
+
+    past = df[df["date"] <= latest_date - pd.DateOffset(years=1)]
+    if not past.empty:
+        past_val = past.iloc[-1]["value"]
+        stats["year_delta"] = latest_val - past_val
+        if past_val:
+            stats["year_pct"] = (latest_val - past_val) / abs(past_val) * 100
+
+    return stats
+
+
+def fmt_pct(v):
+    return f"{v:+.1f}%" if v is not None else None
+
+
+def render_capital_kpi(label, df, fmt_value, fmt_delta):
+    stats = capital_stats(df)
+    if stats is None:
+        return
+    st.metric(label, fmt_value(stats["latest"]))
+    sub1, sub2 = st.columns(2)
+    with sub1:
+        if stats["month_delta"] is not None:
+            st.metric("За месяц", fmt_delta(stats["month_delta"]), delta=fmt_pct(stats["month_pct"]))
+        else:
+            st.caption("За месяц: недостаточно данных")
+    with sub2:
+        if stats["year_delta"] is not None:
+            st.metric("За год", fmt_delta(stats["year_delta"]), delta=fmt_pct(stats["year_pct"]))
+        else:
+            st.caption("За год: недостаточно данных")
+
+
+def fmt_usd(v):
+    sign = "+" if v >= 0 else "-"
+    return f"{sign}${abs(v):,.0f}".replace(",", " ")
+
+
+def fmt_rub_millions(v):
+    return f"{v / 1_000_000:+.1f} млн"
 
 
 # --- KPI-карточки ---
-usd_latest, usd_delta = latest_and_delta(capital_usd)
-rub_latest, rub_delta = latest_and_delta(capital_rub)
-
 kpi1, kpi2 = st.columns(2)
 with kpi1:
-    if usd_latest is not None:
-        delta_str = None
-        if usd_delta is not None:
-            sign = "+" if usd_delta >= 0 else "-"
-            delta_str = f"{sign}${abs(usd_delta):,.0f}".replace(",", " ")
-        st.metric("Капитал, $", f"${usd_latest:,.0f}".replace(",", " "), delta=delta_str)
+    render_capital_kpi(
+        "Капитал, $", capital_usd,
+        fmt_value=lambda v: f"${v:,.0f}".replace(",", " "),
+        fmt_delta=fmt_usd,
+    )
 with kpi2:
-    if rub_latest is not None:
-        delta_str = f"{rub_delta / 1_000_000:+.1f} млн" if rub_delta is not None else None
-        st.metric("Капитал, ₽", f"{rub_latest / 1_000_000:.1f} млн", delta=delta_str)
+    render_capital_kpi(
+        "Капитал, ₽", capital_rub,
+        fmt_value=lambda v: f"{v / 1_000_000:.1f} млн",
+        fmt_delta=fmt_rub_millions,
+    )
 
 st.divider()
 
