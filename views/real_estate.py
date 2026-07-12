@@ -31,6 +31,7 @@ LIABILITIES_COL = "Обязательства"
 GROWTH_COL = "% прироста"
 PAID_COL = "Оплачено %"
 COORDS_COL = "Координаты"
+PRICE_PER_UNIT_COL = "Цена за метр"
 
 
 COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
@@ -108,6 +109,17 @@ def _fmt_money(v):
     return f"{sign}${abs(v):,.0f}".replace(",", " ")
 
 
+def _price_per_unit(price, area_info):
+    """Цена за м² (или за сотку для земли в Га; 1 сотка = 100 м²)."""
+    if pd.isna(price) or not area_info or not area_info.get("value"):
+        return "—"
+    if area_info["unit"] == "Га":
+        per = price / (area_info["value"] * 100)
+        return f"${per:,.0f}/сот".replace(",", " ")
+    per = price / area_info["value"]
+    return f"${per:,.0f}/м²".replace(",", " ")
+
+
 purchase = df[PURCHASE_COL].apply(parse_money) if PURCHASE_COL in df.columns else pd.Series(dtype=float)
 market = df[MARKET_COL].apply(parse_money) if MARKET_COL in df.columns else pd.Series(dtype=float)
 liabilities = df[LIABILITIES_COL].apply(parse_money) if LIABILITIES_COL in df.columns else pd.Series(dtype=float)
@@ -142,8 +154,15 @@ display[GROWTH_COL] = growth_pct.apply(lambda v: f"{v:+.1f}%" if pd.notna(v) els
 paid_pct = ((purchase - liabilities.abs()) / purchase.replace(0, pd.NA) * 100).clip(lower=0, upper=100)
 display[PAID_COL] = paid_pct
 
-# Столбцы "% прироста" и "Оплачено %" сразу после "Обязательства"
-cols = [c for c in display.columns if c not in (GROWTH_COL, PAID_COL)]
+area_info_series = df[AREA_COL].apply(parse_area) if AREA_COL in df.columns else pd.Series([None] * len(df))
+display[PRICE_PER_UNIT_COL] = [_price_per_unit(p, a) for p, a in zip(purchase, area_info_series)]
+
+# "Цена за метр" — сразу после "Площадь"; "% прироста"/"Оплачено %" — после "Обязательства"
+cols = [c for c in display.columns if c not in (GROWTH_COL, PAID_COL, PRICE_PER_UNIT_COL)]
+if AREA_COL in cols:
+    cols.insert(cols.index(AREA_COL) + 1, PRICE_PER_UNIT_COL)
+else:
+    cols.append(PRICE_PER_UNIT_COL)
 insert_at = cols.index(LIABILITIES_COL) + 1 if LIABILITIES_COL in cols else len(cols)
 cols.insert(insert_at, GROWTH_COL)
 cols.insert(insert_at + 1, PAID_COL)
