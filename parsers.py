@@ -1,4 +1,6 @@
 """Разбор листов книги в pandas DataFrame."""
+import re
+
 import pandas as pd
 
 PROGRESS_SHEET = "Прогресс"
@@ -81,3 +83,34 @@ def parse_real_estate(wb) -> pd.DataFrame:
     if "Тип" in df.columns:
         df = df.dropna(subset=["Тип"])
     return df.reset_index(drop=True)
+
+
+def parse_money(value):
+    """Превращает '$51 203', '- $8572', '$100 000 ' и т.п. в float (со знаком)."""
+    if value is None:
+        return None
+    s = str(value)
+    negative = "-" in s
+    digits = re.sub(r"[^\d.]", "", s)
+    if digits == "":
+        return None
+    amount = float(digits)
+    return -amount if negative else amount
+
+
+def parse_area(value):
+    """Превращает '26 м²' -> {'value': 26.0, 'unit': 'м²'}, '5.6 Га' -> {'value': 5.6, 'unit': 'Га'}."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s == "":
+        return None
+    is_hectare = "га" in s.lower()
+    digits = re.sub(r"[^\d.,]", "", s).replace(",", ".")
+    if digits == "":
+        return None
+    try:
+        amount = float(digits)
+    except ValueError:
+        return None
+    return {"value": amount, "unit": "Га" if is_hectare else "м²"}
