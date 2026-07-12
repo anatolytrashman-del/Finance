@@ -114,3 +114,71 @@ def parse_area(value):
     except ValueError:
         return None
     return {"value": amount, "unit": "Га" if is_hectare else "м²"}
+
+
+_MONTHS_RU = {
+    "янв": 1, "февр": 2, "март": 3, "апрел": 4, "ма": 5,
+    "июн": 6, "июл": 7, "август": 8, "сентябр": 9,
+    "октябр": 10, "нояб": 11, "декабр": 12,
+}
+
+
+def _sheet_sort_key(name: str):
+    """Достаёт (год, месяц, день) из имени листа вида '1 июля 2026' или '4 феврая 2024'."""
+    m = re.search(r"(\d{1,2})\s+([А-Яа-яЁё]+)\s+(\d{4})", name)
+    if not m:
+        return None
+    day, month_word, year = m.groups()
+    month_word = month_word.lower()
+    month = next((num for prefix, num in _MONTHS_RU.items() if month_word.startswith(prefix)), None)
+    if month is None:
+        return None
+    return (int(year), month, int(day))
+
+
+def _find_latest_snapshot_sheet(wb):
+    """Ищет самый свежий помесячный срез капитала (листы вида '1 июля 2026')."""
+    best_name, best_key = None, None
+    for name in wb.sheetnames:
+        key = _sheet_sort_key(name)
+        if key is not None and (best_key is None or key > best_key):
+            best_key, best_name = key, name
+    return wb[best_name] if best_name else None
+
+
+def parse_asset_allocation(wb) -> pd.DataFrame:
+    """Разбивка капитала по классам активов из таблицы 'Распределение по группам активов'
+    на самом свежем помесячном срезе."""
+    ws = _find_latest_snapshot_sheet(wb)
+    if ws is None:
+        return pd.DataFrame(columns=["Категория", "Сумма", "Доля"])
+
+    header_row, header_col = None, None
+    for row in range(1, ws.max_row + 1):
+        for col in range(1, ws.max_column + 1):
+            if (
+                ws.cell(row=row, column=col).value == "Тип"
+                and ws.cell(row=row, column=col + 1).value == "Сумма"
+            ):
+                header_row, header_col = row, col
+                break
+        if header_row:
+            break
+    if header_row is None:
+        return pd.DataFrame(columns=["Категория", "Сумма", "Доля"])
+
+    categories, amounts, shares = [], [], []
+    row = header_row + 1
+    while True:
+        name = ws.cell(row=row, column=header_col).value
+        if name is None:
+            break
+        amount = ws.cell(row=row, column=header_col + 1).value
+        share = ws.cell(row=row, column=header_col + 2).value
+        if isinstance(amount, (int, float)) and amount > 0:
+            categories.append(str(name).strip())
+            amounts.append(float(amount))
+            shares.append(float(share) * 100 if isinstance(share, (int, float)) else None)
+        row += 1
+
+    return pd.DataFrame({"Категория": categories, "Сумма": amounts, "Доля": shares})

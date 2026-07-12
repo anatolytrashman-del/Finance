@@ -5,8 +5,6 @@ import streamlit as st
 from data_source import get_workbook, sidebar_refresh_control
 from parsers import parse_deals
 
-st.set_page_config(page_title="Сделки", page_icon="📈", layout="wide")
-
 sidebar_refresh_control()
 
 st.title("📈 Реестр сделок")

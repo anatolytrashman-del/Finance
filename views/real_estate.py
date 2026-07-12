@@ -4,8 +4,6 @@ import streamlit as st
 from data_source import get_workbook, sidebar_refresh_control
 from parsers import parse_area, parse_money, parse_real_estate
 
-st.set_page_config(page_title="Недвижимость", page_icon="🏠", layout="wide")
-
 sidebar_refresh_control()
 
 st.title("🏠 Портфолио объектов недвижимости")
@@ -46,7 +44,9 @@ def _fmt_plain(v):
     if pd.isna(v):
         return ""
     if isinstance(v, float):
-        return f"{v:g}"
+        if v == int(v):
+            return f"{int(v):,}".replace(",", " ")
+        return f"{v:,.2f}".replace(",", " ")
     return str(v)
 
 
