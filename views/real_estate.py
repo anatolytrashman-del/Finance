@@ -32,6 +32,7 @@ GROWTH_COL = "% прироста"
 PAID_COL = "Оплачено %"
 COORDS_COL = "Координаты"
 PRICE_PER_UNIT_COL = "Цена за метр"
+CURRENT_PRICE_PER_UNIT_COL = "Текущая цена метра"
 
 
 COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
@@ -156,13 +157,19 @@ display[PAID_COL] = paid_pct
 
 area_info_series = df[AREA_COL].apply(parse_area) if AREA_COL in df.columns else pd.Series([None] * len(df))
 display[PRICE_PER_UNIT_COL] = [_price_per_unit(p, a) for p, a in zip(purchase, area_info_series)]
+display[CURRENT_PRICE_PER_UNIT_COL] = [_price_per_unit(m, a) for m, a in zip(market, area_info_series)]
 
-# "Цена за метр" — сразу после "Площадь"; "% прироста"/"Оплачено %" — после "Обязательства"
-cols = [c for c in display.columns if c not in (GROWTH_COL, PAID_COL, PRICE_PER_UNIT_COL)]
+# "Цена за метр"/"Текущая цена метра" — после "Площадь"; "% прироста"/"Оплачено %" — после "Обязательства"
+cols = [
+    c
+    for c in display.columns
+    if c not in (GROWTH_COL, PAID_COL, PRICE_PER_UNIT_COL, CURRENT_PRICE_PER_UNIT_COL)
+]
 if AREA_COL in cols:
     cols.insert(cols.index(AREA_COL) + 1, PRICE_PER_UNIT_COL)
+    cols.insert(cols.index(PRICE_PER_UNIT_COL) + 1, CURRENT_PRICE_PER_UNIT_COL)
 else:
-    cols.append(PRICE_PER_UNIT_COL)
+    cols.extend([PRICE_PER_UNIT_COL, CURRENT_PRICE_PER_UNIT_COL])
 insert_at = cols.index(LIABILITIES_COL) + 1 if LIABILITIES_COL in cols else len(cols)
 cols.insert(insert_at, GROWTH_COL)
 cols.insert(insert_at + 1, PAID_COL)
