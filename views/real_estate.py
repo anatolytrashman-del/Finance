@@ -2,10 +2,9 @@ import json
 import re
 
 import pandas as pd
-import requests
 import streamlit as st
 
-from config import YANDEX_GEOCODER_API_KEY, YANDEX_MAPS_API_KEY
+from config import YANDEX_MAPS_API_KEY
 from data_source import get_workbook, sidebar_refresh_control
 from parsers import parse_area, parse_money, parse_real_estate
 
@@ -31,57 +30,31 @@ MARKET_COL = "Примерная рыночная стоимость в $"
 LIABILITIES_COL = "Обязательства"
 GROWTH_COL = "% прироста"
 PAID_COL = "Оплачено %"
+COORDS_COL = "Координаты"
 
 
 COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
-@st.cache_data(show_spinner=False)
-def _geocode_address(address: str, api_key: str):
-    """Возвращает [lat, lon] через HTTP Geocoder API Яндекса или None, если не нашёл."""
-    try:
-        resp = requests.get(
-            "https://geocode-maps.yandex.ru/1.x/",
-            params={
-                "apikey": api_key,
-                "format": "json",
-                "geocode": address,
-                "lang": "ru_RU",
-                "results": 1,
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        members = resp.json()["response"]["GeoObjectCollection"]["featureMember"]
-        if not members:
-            return None
-        pos = members[0]["GeoObject"]["Point"]["pos"]  # "lon lat"
-        lon_str, lat_str = pos.split()
-        return [float(lat_str), float(lon_str)]
-    except Exception:
-        return None
-
-
-def _build_map_objects(df, geocoder_key):
-    objects, failed = [], []
+def _build_map_objects(df):
+    """Строит метки карты из технической колонки COORDS_COL (формат 'lat, lon')."""
+    objects, missing = [], []
     for _, row in df.iterrows():
-        addr_raw = str(row.get("Точный адрес") or "").strip()
-        location = str(row.get("Локация") or "").strip()
         title = str(row.get("Тип") or "Объект")
-        coords_match = COORDS_RE.match(addr_raw)
-        query = ", ".join(p for p in [location, addr_raw] if p)
-        if coords_match:
-            coords = [float(coords_match.group(1)), float(coords_match.group(2))]
-        elif query and geocoder_key:
-            coords = _geocode_address(query, geocoder_key)
-        else:
-            coords = None
-        if coords is None:
-            failed.append(f"{title} — {query or 'адрес не указан'}")
+        location = str(row.get("Локация") or "").strip()
+        raw_coords = str(row.get(COORDS_COL) or "").strip()
+        match = COORDS_RE.match(raw_coords)
+        if not match:
+            missing.append(f"{title} — {location or 'без локации'}")
             continue
-        info_parts = [p for p in [location, addr_raw, str(row.get("Статус") or "").strip()] if p]
+        coords = [float(match.group(1)), float(match.group(2))]
+        info_parts = [
+            p
+            for p in [location, str(row.get("Точный адрес") or "").strip(), str(row.get("Статус") or "").strip()]
+            if p
+        ]
         objects.append({"title": title, "coords": coords, "info": "<br>".join(info_parts)})
-    return objects, failed
+    return objects, missing
 
 
 def _build_map_html(objects, api_key):
@@ -138,6 +111,8 @@ def _fmt_plain(v):
 
 
 display = df.copy()
+if COORDS_COL in display.columns:
+    display = display.drop(columns=[COORDS_COL])
 special_cols = {PURCHASE_COL, MARKET_COL, LIABILITIES_COL}
 for col in display.columns:
     if col not in special_cols:
@@ -198,11 +173,14 @@ display_with_totals = pd.concat([display, pd.DataFrame([totals_row])], ignore_in
 
 st.caption(f"Объектов: {len(df)}")
 
-map_objects, failed_addresses = _build_map_objects(df, YANDEX_GEOCODER_API_KEY)
+map_objects, missing_coords = _build_map_objects(df)
 if map_objects and YANDEX_MAPS_API_KEY:
     st.components.v1.html(_build_map_html(map_objects, YANDEX_MAPS_API_KEY), height=530)
-if failed_addresses:
-    st.warning("Не нашёл на карте:\n" + "\n".join(f"- {a}" for a in failed_addresses))
+if missing_coords:
+    st.warning(
+        "Нет координат (заполни столбец «Координаты» в формате lat, lon):\n"
+        + "\n".join(f"- {a}" for a in missing_coords)
+    )
 
 st.dataframe(
     display_with_totals,
@@ -218,6 +196,8 @@ for _, row in df.iterrows():
     location = row.get("Локация", "")
     with st.expander(f"{title} — {location}"):
         for col in df.columns:
+            if col == COORDS_COL:
+                continue
             value = row.get(col)
             if value is not None and str(value).strip() not in ("", "None", "nan"):
                 safe_col = str(col).replace("$", r"\$")
