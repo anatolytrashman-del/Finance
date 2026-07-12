@@ -42,37 +42,6 @@ if DEAL_TYPE_COL in df.columns and "Дата" in df.columns and "Сумма" in 
         )
         st.plotly_chart(fig, use_container_width=True)
 
-if "Вид актива" in df.columns and "Дата" in df.columns and "Сумма" in df.columns:
-    portfolio_df = df[df["Вид актива"] != "Недвижимость"].copy()
-    if not portfolio_df.empty:
-        if DEAL_TYPE_COL in portfolio_df.columns:
-            sign = portfolio_df[DEAL_TYPE_COL].map({"Покупка": 1, "Продажа": -1}).fillna(1)
-        else:
-            sign = 1
-        portfolio_df["signed"] = portfolio_df["Сумма"] * sign
-        portfolio_df = portfolio_df.sort_values("Дата")
-        pivot = portfolio_df.pivot_table(
-            index="Дата", columns="Вид актива", values="signed", aggfunc="sum", fill_value=0
-        )
-        cumulative = pivot.cumsum().reset_index().melt(
-            id_vars="Дата", var_name="Вид актива", value_name="Сумма"
-        )
-        st.subheader("Чистые вложения по видам активов, накопительно, $")
-        st.caption(
-            "Вложено минус выведено по каждому виду актива (без недвижимости — она отдельно "
-            "на странице «Недвижимость»). Это не текущая стоимость позиции: если продал "
-            "с прибылью больше, чем вложил, линия уходит в минус — это нормально."
-        )
-        fig = px.area(cumulative, x="Дата", y="Сумма", color="Вид актива")
-        fig.update_layout(
-            xaxis_title=None,
-            yaxis_title="USD",
-            legend_title=None,
-            margin=dict(l=10, r=10, t=10, b=10),
-            height=320,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
 col1, col2, col3 = st.columns(3)
 with col1:
     asset_types = sorted(df["Вид актива"].dropna().unique()) if "Вид актива" in df.columns else []
