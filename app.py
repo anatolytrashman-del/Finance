@@ -7,6 +7,7 @@ st.logo("assets/logo.svg", size="large")
 dashboard = st.Page("views/dashboard.py", title="Дашборды", icon="📊", default=True)
 deals = st.Page("views/deals.py", title="Сделки", icon="📈")
 real_estate = st.Page("views/real_estate.py", title="Недвижимость", icon="🏠")
+ideas = st.Page("views/ideas.py", title="Инвест-идеи", icon="💡")
 
-nav = st.navigation([dashboard, deals, real_estate])
+nav = st.navigation([dashboard, deals, real_estate, ideas])
 nav.run()
