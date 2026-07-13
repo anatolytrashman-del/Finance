@@ -116,7 +116,7 @@ if DEAL_TYPE_COL in filtered.columns and "Сумма" in filtered.columns:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Итого проинвестировано", _fmt_pos(_sum_by_type("Покупка")))
     m2.metric("Итого продано", _fmt_pos(_sum_by_type("Продажа")))
-    m3.metric("Итого выдано в займ", _fmt_pos(_sum_by_type("Займ")))
+    m3.metric("Итого выдано в займ", _fmt_pos(_sum_by_type("Выдача займа")))
     profit_total = filtered[PROFIT_COL].sum() if PROFIT_COL in filtered.columns else 0
     m4.metric("Чистая прибыль по сделкам", _fmt_signed(profit_total))
 elif "Сумма" in filtered.columns:
