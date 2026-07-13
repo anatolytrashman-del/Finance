@@ -2,19 +2,16 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from data_source import get_workbook, sidebar_refresh_control
-from parsers import parse_asset_allocation, parse_progress
+from data_source import load_asset_allocation, load_progress, sidebar_refresh_control
 
 sidebar_refresh_control()
 
 st.title("📊 Дашборд капитала")
 
-wb = get_workbook()
-if wb is None:
+data = load_progress()
+if data is None:
     st.info("Нажми «Обновить данные» в боковой панели, чтобы загрузить таблицу.")
     st.stop()
-
-data = parse_progress(wb)
 capital_usd = data.get("capital_usd", pd.DataFrame())
 capital_rub = data.get("capital_rub", pd.DataFrame())
 debt = data.get("debt", pd.DataFrame())
@@ -188,7 +185,7 @@ with col5:
     line_chart(debt, "USD", "#C62828")
 with col6:
     st.subheader("Структура капитала по классам активов")
-    allocation = parse_asset_allocation(wb)
+    allocation = load_asset_allocation()
     if allocation.empty:
         st.warning("Не нашёл помесячный срез с разбивкой по активам.")
     else:

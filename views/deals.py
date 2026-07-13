@@ -2,19 +2,16 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from data_source import get_workbook, sidebar_refresh_control
-from parsers import parse_deals
+from data_source import load_deals, sidebar_refresh_control
 
 sidebar_refresh_control()
 
 st.title("📈 Реестр сделок")
 
-wb = get_workbook()
-if wb is None:
+df = load_deals()
+if df is None:
     st.info("Нажми «Обновить данные» в боковой панели, чтобы загрузить таблицу.")
     st.stop()
-
-df = parse_deals(wb)
 
 if df.empty:
     st.warning("Лист «Сделки» пуст или не найден.")

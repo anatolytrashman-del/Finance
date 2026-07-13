@@ -5,19 +5,17 @@ import pandas as pd
 import streamlit as st
 
 from config import YANDEX_MAPS_API_KEY
-from data_source import get_workbook, sidebar_refresh_control
-from parsers import parse_area, parse_money, parse_real_estate, parse_real_estate_sold
+from data_source import load_real_estate, load_real_estate_sold, sidebar_refresh_control
+from parsers import parse_area, parse_money
 
 sidebar_refresh_control()
 
 st.title("🏠 Портфолио объектов недвижимости")
 
-wb = get_workbook()
-if wb is None:
+df = load_real_estate()
+if df is None:
     st.info("Нажми «Обновить данные» в боковой панели, чтобы загрузить таблицу.")
     st.stop()
-
-df = parse_real_estate(wb)
 
 if df.empty:
     st.warning("Лист «Real Estate» пуст или не найден.")
@@ -141,9 +139,17 @@ def _price_per_unit(price, area_info, share=1.0):
     return f"${per:,.0f}/м²".replace(",", " ")
 
 
-purchase = df[PURCHASE_COL].apply(parse_money) if PURCHASE_COL in df.columns else pd.Series(dtype=float)
-market = df[MARKET_COL].apply(parse_money) if MARKET_COL in df.columns else pd.Series(dtype=float)
-liabilities = df[LIABILITIES_COL].apply(parse_money) if LIABILITIES_COL in df.columns else pd.Series(dtype=float)
+def _num_col(col):
+    """Числовой столбец (через parse_money). Если столбца нет — Series из NaN нужной длины,
+    чтобы страница не падала при отсутствии/переименовании колонки."""
+    if col in df.columns:
+        return df[col].apply(parse_money)
+    return pd.Series([float("nan")] * len(df), index=df.index)
+
+
+purchase = _num_col(PURCHASE_COL)
+market = _num_col(MARKET_COL)
+liabilities = _num_col(LIABILITIES_COL)
 
 growth_pct = (market - purchase) / purchase.replace(0, pd.NA) * 100
 
@@ -271,7 +277,7 @@ for _, row in df.iterrows():
                 st.write(f"**{safe_col}:** {safe_value}")
 
 # Проданные объекты — внизу страницы
-sold = parse_real_estate_sold(wb)
+sold = load_real_estate_sold()
 if not sold.empty:
     SALE_COL = "Цена продажи"
     PROFIT_COL = "Прибыль"
