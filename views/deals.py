@@ -71,15 +71,32 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
 
 st.caption(f"Найдено сделок: {len(filtered)}")
 
+
+def _signed_amount(row):
+    """Покупки — со знаком минус (отток), продажи и займы — с плюсом (приток)."""
+    amt = row.get("Сумма")
+    if pd.isna(amt):
+        return amt
+    if DEAL_TYPE_COL in row and row[DEAL_TYPE_COL] == "Покупка":
+        return -abs(amt)
+    return abs(amt)
+
+
+def _fmt_signed(v):
+    if pd.isna(v):
+        return ""
+    sign = "-" if v < 0 else ""
+    return f"{sign}${abs(v):,.0f}".replace(",", " ")
+
+
 display = filtered.copy()
 if "Дата" in display.columns:
     display["Дата"] = display["Дата"].dt.strftime("%d.%m.%Y")
-if "Сумма" in display.columns:
-    display["Сумма"] = display["Сумма"].apply(
-        lambda v: f"${v:,.0f}".replace(",", " ") if pd.notna(v) else ""
-    )
+if "Сумма" in filtered.columns:
+    signed = filtered.apply(_signed_amount, axis=1) if len(filtered) else filtered["Сумма"]
+    display["Сумма"] = signed.apply(_fmt_signed)
 
 st.dataframe(display, width="stretch", hide_index=True)
 
 if "Сумма" in filtered.columns:
-    st.metric("Сумма по фильтру", f"${filtered['Сумма'].sum():,.0f}".replace(",", " "))
+    st.metric("Итог по фильтру (нетто)", _fmt_signed(signed.sum()))
