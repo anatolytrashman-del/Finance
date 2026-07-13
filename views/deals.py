@@ -18,6 +18,7 @@ if df.empty:
     st.stop()
 
 DEAL_TYPE_COL = "Тип сделки"
+PROFIT_COL = "Чистая прибыль по сделке"
 
 if DEAL_TYPE_COL in df.columns and "Дата" in df.columns and "Сумма" in df.columns:
     purchases = df[df[DEAL_TYPE_COL] == "Покупка"]
@@ -95,6 +96,8 @@ if "Дата" in display.columns:
 if "Сумма" in filtered.columns:
     signed = filtered.apply(_signed_amount, axis=1) if len(filtered) else filtered["Сумма"]
     display["Сумма"] = signed.apply(_fmt_signed)
+if PROFIT_COL in display.columns:
+    display[PROFIT_COL] = filtered[PROFIT_COL].apply(_fmt_signed)
 
 st.dataframe(display, width="stretch", hide_index=True)
 
@@ -110,9 +113,11 @@ def _sum_by_type(deal_type):
 
 
 if DEAL_TYPE_COL in filtered.columns and "Сумма" in filtered.columns:
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("Итого проинвестировано", _fmt_pos(_sum_by_type("Покупка")))
     m2.metric("Итого продано", _fmt_pos(_sum_by_type("Продажа")))
     m3.metric("Итого выдано в займ", _fmt_pos(_sum_by_type("Займ")))
+    profit_total = filtered[PROFIT_COL].sum() if PROFIT_COL in filtered.columns else 0
+    m4.metric("Чистая прибыль по сделкам", _fmt_signed(profit_total))
 elif "Сумма" in filtered.columns:
     st.metric("Сумма по фильтру", _fmt_pos(filtered["Сумма"].sum()))
