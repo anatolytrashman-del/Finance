@@ -98,5 +98,21 @@ if "Сумма" in filtered.columns:
 
 st.dataframe(display, width="stretch", hide_index=True)
 
-if "Сумма" in filtered.columns:
-    st.metric("Итог по фильтру (нетто)", _fmt_signed(signed.sum()))
+
+def _fmt_pos(v):
+    return f"${v:,.0f}".replace(",", " ")
+
+
+def _sum_by_type(deal_type):
+    if DEAL_TYPE_COL in filtered.columns and "Сумма" in filtered.columns:
+        return filtered.loc[filtered[DEAL_TYPE_COL] == deal_type, "Сумма"].sum()
+    return 0
+
+
+if DEAL_TYPE_COL in filtered.columns and "Сумма" in filtered.columns:
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Итого проинвестировано", _fmt_pos(_sum_by_type("Покупка")))
+    m2.metric("Итого продано", _fmt_pos(_sum_by_type("Продажа")))
+    m3.metric("Итого выдано в займ", _fmt_pos(_sum_by_type("Займ")))
+elif "Сумма" in filtered.columns:
+    st.metric("Сумма по фильтру", _fmt_pos(filtered["Сумма"].sum()))
