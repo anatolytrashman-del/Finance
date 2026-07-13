@@ -96,8 +96,9 @@ if "Дата" in display.columns:
 if "Сумма" in filtered.columns:
     signed = filtered.apply(_signed_amount, axis=1) if len(filtered) else filtered["Сумма"]
     display["Сумма"] = signed.apply(_fmt_signed)
+# "Чистая прибыль по сделке" — технический столбец (только для счётчика), в таблице не показываем
 if PROFIT_COL in display.columns:
-    display[PROFIT_COL] = filtered[PROFIT_COL].apply(_fmt_signed)
+    display = display.drop(columns=[PROFIT_COL])
 
 st.dataframe(display, width="stretch", hide_index=True)
 
