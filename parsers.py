@@ -196,6 +196,143 @@ def _find_latest_snapshot_sheet(wb):
     return wb[best_name] if best_name else None
 
 
+def _bal_num(v):
+    return float(v) if isinstance(v, (int, float)) else None
+
+
+def _bal_currency(label, orig, usd, eur, rub):
+    """Символ валюты оригинала: по ключевым словам в названии, иначе по курсу."""
+    text = str(label or "")
+    low = text.lower()
+    if "usdt" in low:
+        return "USDT"
+    if "₽" in text or "рубл" in low:
+        return "₽"
+    if "евро" in low or "€" in text:
+        return "€"
+    if "доллар" in low or "$" in text:
+        return "$"
+    if orig and usd and orig != 0:
+        ratio = usd / orig
+        if abs(ratio - 1) < 0.05:
+            return "$"
+        if eur and abs(ratio - eur) / eur < 0.06:
+            return "€"
+        if rub and abs(ratio - rub) / rub < 0.15:
+            return "₽"
+    return ""
+
+
+def parse_balance(wb) -> dict:
+    """Баланс с последнего месячного среза (лист вида «14 июля 2026»).
+
+    Активы читаются из столбцов A/B/C (актив / в валюте / в $), обязательства —
+    из G/H/I. Строки ищутся по названию, а не по номеру, чтобы страница не
+    ломалась при добавлении/удалении объектов."""
+    ws = _find_latest_snapshot_sheet(wb)
+    if ws is None:
+        return None
+
+    rows = []
+    for r in range(1, ws.max_row + 1):
+        a = ws.cell(row=r, column=1).value
+        rows.append({
+            "row": r,
+            "label": a.strip() if isinstance(a, str) else None,
+            "orig": _bal_num(ws.cell(row=r, column=2).value),
+            "usd": _bal_num(ws.cell(row=r, column=3).value),
+        })
+
+    def _rate(needle):
+        for r in range(1, ws.max_row + 1):
+            g = ws.cell(row=r, column=7).value
+            if isinstance(g, str) and needle.lower() in g.lower():
+                return _bal_num(ws.cell(row=r, column=8).value)
+        return None
+
+    eur = _rate("EUR") or 1.142
+    rub = _rate("RUB") or 0.0117
+
+    def _mk(label, orig, usd):
+        return {
+            "name": label,
+            "orig": orig,
+            "usd": usd or 0.0,
+            "currency": _bal_currency(label, orig, usd, eur, rub),
+        }
+
+    by_label = {}
+    for row in rows:
+        if row["label"] and row["label"] not in by_label:
+            by_label[row["label"]] = row
+
+    def item(label):
+        """Строка по точному названию, иначе по вхождению; отсутствует -> $0."""
+        row = by_label.get(label)
+        if row is None:
+            low = label.lower()
+            row = next((r for r in rows if r["label"] and low in r["label"].lower()), None)
+        if row is None:
+            return {"name": label, "orig": None, "usd": 0.0, "currency": ""}
+        return _mk(row["label"], row["orig"], row["usd"])
+
+    def group(labels):
+        return [item(lbl) for lbl in labels]
+
+    def section(header_label):
+        """Строки под заголовком до строки-подытога (A пустой, C числовой)."""
+        start = next((i for i, r in enumerate(rows) if r["label"] == header_label), None)
+        items = []
+        if start is None:
+            return items
+        for row in rows[start + 1:]:
+            if row["label"] is None and row["usd"] is None:
+                continue  # пустая строка-разделитель
+            if row["label"] is None and row["usd"] is not None:
+                break  # строка-подытог
+            if row["label"] and row["usd"] is None:
+                break  # заголовок следующей секции
+            if row["label"] and row["usd"] is not None:
+                items.append(_mk(row["label"], row["orig"], row["usd"]))
+        return items
+
+    obligations, obligations_total = [], None
+    for r in range(2, 10):  # G/H/I строки 1–9 (1 — шапка)
+        g = ws.cell(row=r, column=7).value
+        if not isinstance(g, str) or not g.strip():
+            continue
+        orig = _bal_num(ws.cell(row=r, column=8).value)
+        usd = _bal_num(ws.cell(row=r, column=9).value)
+        if "итого" in g.lower():
+            obligations_total = usd
+        else:
+            obligations.append(_mk(g.strip(), orig, usd))
+
+    grand_total = None
+    for r in range(1, ws.max_row + 1):
+        b = ws.cell(row=r, column=2).value
+        if isinstance(b, str) and "итого" in b.lower():
+            grand_total = _bal_num(ws.cell(row=r, column=3).value)
+            break
+
+    return {
+        "sheet_name": ws.title.strip(),
+        "bank": group(["Счет ₽ Tinkoff", "BNB-банк", "Грузинский банк"]),
+        "cash": group(["Наличные рубли", "Наличка евро", "Наличка доллары"]),
+        "crypto": group(["USDT"]),
+        "returns": group(["Возврат за апартаменты", "Возврат за машиноместо"]),
+        "loans": section("Займы"),
+        "real_estate": section("Недвижимость"),
+        "frozen": group(["Заблокированные бумаги (не в учете)"]),
+        "art": group(["Искусство Masterworks"]),
+        "business": group(["Баланс ИП", "Баланс Артплая"]),
+        "obligations": obligations,
+        "obligations_total": obligations_total,
+        "grand_total": grand_total,
+        "rates": {"eur": eur, "rub": rub},
+    }
+
+
 def parse_asset_allocation(wb) -> pd.DataFrame:
     """Разбивка капитала по классам активов из таблицы 'Распределение по группам активов'
     на самом свежем помесячном срезе."""

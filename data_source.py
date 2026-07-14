@@ -59,6 +59,11 @@ def _asset_allocation(version, _raw):
     return parsers.parse_asset_allocation(_workbook(version, _raw))
 
 
+@st.cache_data(show_spinner=False)
+def _balance(version, _raw):
+    return parsers.parse_balance(_workbook(version, _raw))
+
+
 def _ensure_loaded(force_refresh: bool = False):
     """Гарантирует, что байты таблицы загружены. Возвращает (version, raw)."""
     if force_refresh or "workbook_bytes" not in st.session_state:
@@ -98,6 +103,11 @@ def load_real_estate_sold():
 def load_asset_allocation():
     version, raw = _ensure_loaded()
     return _asset_allocation(version, raw) if raw is not None else None
+
+
+def load_balance():
+    version, raw = _ensure_loaded()
+    return _balance(version, raw) if raw is not None else None
 
 
 def sidebar_refresh_control():
