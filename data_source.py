@@ -64,6 +64,11 @@ def _balance(version, _raw):
     return parsers.parse_balance(_workbook(version, _raw))
 
 
+@st.cache_data(show_spinner=False)
+def _balance_history(version, _raw):
+    return parsers.parse_balance_history(_workbook(version, _raw))
+
+
 def _ensure_loaded(force_refresh: bool = False):
     """Гарантирует, что байты таблицы загружены. Возвращает (version, raw)."""
     if force_refresh or "workbook_bytes" not in st.session_state:
@@ -108,6 +113,11 @@ def load_asset_allocation():
 def load_balance():
     version, raw = _ensure_loaded()
     return _balance(version, raw) if raw is not None else None
+
+
+def load_balance_history():
+    version, raw = _ensure_loaded()
+    return _balance_history(version, raw) if raw is not None else None
 
 
 def sidebar_refresh_control():
