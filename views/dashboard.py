@@ -17,10 +17,22 @@ capital_rub = data.get("capital_rub", pd.DataFrame())
 debt = data.get("debt", pd.DataFrame())
 
 
+def monthly_view(df):
+    """Помесячный взгляд на серию: показания за 1-е число месяца + самое
+    последнее показание как отдельная самостоятельная точка. Промежуточные
+    внутримесячные отчёты (не 1-е число и не последний) пропускаются."""
+    if df is None or df.empty:
+        return df
+    df = df.sort_values("date").reset_index(drop=True)
+    keep = (df["date"].dt.day == 1) | (df["date"] == df["date"].iloc[-1])
+    return df[keep].reset_index(drop=True)
+
+
 def line_chart(df, y_label, color):
     if df is None or df.empty:
         st.warning("Нет данных для отображения.")
         return
+    df = monthly_view(df)
     fig = px.line(df, x="date", y="value", markers=True)
     fig.update_traces(line_color=color)
     fig.update_layout(
@@ -33,7 +45,12 @@ def line_chart(df, y_label, color):
 
 
 def capital_stats(df):
-    """Последнее значение + изменение за месяц и за год (сумма и %)."""
+    """Последнее значение + изменение за месяц и за год (сумма и %).
+
+    Считаем по помесячному ряду (1-е число + последнее самостоятельное
+    показание): «за месяц» — от последнего доступного 1-го числа, «за год» —
+    от 1-го числа примерно год назад, а не «12 строчек назад»."""
+    df = monthly_view(df)
     if df is None or df.empty:
         return None
     latest_row = df.iloc[-1]
@@ -156,17 +173,16 @@ with col3:
 with col4:
     st.subheader("Долг / капитал, %")
     if not debt.empty and not capital_usd.empty:
-        merged = pd.merge(
-            capital_usd.assign(ym=capital_usd["date"].dt.to_period("M")),
-            debt.assign(ym=debt["date"].dt.to_period("M")),
-            on="ym",
-            suffixes=("_cap", "_debt"),
-        )
+        # Мерджим по точной дате отчёта и берём помесячный ряд (1-е число +
+        # последнее показание) — иначе два отчёта за один месяц (13 и 14 июля)
+        # дают дубли и вертикальные всплески на графике.
+        merged = pd.merge(capital_usd, debt, on="date", suffixes=("_cap", "_debt"))
+        merged = monthly_view(merged)
         if merged.empty:
-            st.warning("Нет пересекающихся месяцев для расчёта.")
+            st.warning("Нет пересекающихся дат для расчёта.")
         else:
             merged["leverage"] = -merged["value_debt"] / merged["value_cap"] * 100
-            fig = px.line(merged, x="date_cap", y="leverage", markers=True)
+            fig = px.line(merged, x="date", y="leverage", markers=True)
             fig.update_traces(line_color="#EF6C00")
             fig.update_layout(
                 xaxis_title=None,
