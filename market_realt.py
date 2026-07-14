@@ -81,12 +81,16 @@ GEO_TYPES = [1, 2, 3, 4, 5, 6, 7]  # тип «улица» — один из э�
 
 
 def _gql(operation, query, variables):
+    """Возвращает (data, errors). errors — список строк-описаний, если есть."""
     payload = [{"operationName": operation, "variables": variables, "query": query}]
     resp = requests.post(ENDPOINT, headers=HEADERS, json=payload, timeout=30)
     resp.raise_for_status()
     data = resp.json()
-    item = data[0] if isinstance(data, list) else data
-    return (item or {}).get("data") or {}
+    item = (data[0] if isinstance(data, list) else data) or {}
+    errors = [
+        (e.get("message") or str(e)) for e in (item.get("errors") or [])
+    ]
+    return item.get("data") or {}, errors
 
 
 def _rate_map(rates):
@@ -106,12 +110,14 @@ def resolve_street_uuids(street_query):
     """Находит минские streetUuid по названию улицы. Возвращает (uuids, warnings)."""
     key = street_query.split()[-1].lower()  # «савицкого» / «алфёрова»
     try:
-        data = _gql(
+        data, errors = _gql(
             "multiGeoReferenceAgg", GEO_QUERY,
             {"data": {"where": {"title": street_query, "types": GEO_TYPES}, "pageSize": 15}},
         )
     except Exception as exc:  # noqa: BLE001
         return [], [f"realt «{street_query}»: гео-поиск не отработал ({exc})"]
+    if errors:
+        return [], [f"realt «{street_query}»: гео-поиск вернул ошибку ({'; '.join(errors)})"]
 
     streets = (((data.get("multiGeoReferenceAgg") or {}).get("body") or {}).get("streets")) or []
     uuids = []
@@ -198,6 +204,47 @@ def _parse_object(obj, house, address_label, rates):
     }
 
 
+# Точный формат пагинации у searchObjectsV2 заранее неизвестен, а лишнее поле
+# во входных данных валит весь GraphQL-запрос (data=null). Поэтому перебираем
+# несколько вариантов и берём тот, что сервер принимает. page-aware варианты
+# идут первыми, «plain» (дефолтная выдача) — последним запасным.
+def _data_variants(where, page):
+    return [
+        ("pageSize+page", {"where": where, "pageSize": PAGE_SIZE, "page": page}),
+        ("pagination", {"where": where, "pagination": {"page": page, "pageSize": PAGE_SIZE}}),
+        ("pageSize+pageNumber", {"where": where, "pageSize": PAGE_SIZE, "pageNumber": page}),
+        ("pageSize", {"where": where, "pageSize": PAGE_SIZE}),
+        ("plain", {"where": where}),
+    ]
+
+
+PAGED_SHAPES = {"pageSize+page", "pagination", "pageSize+pageNumber"}
+
+
+def _search(where, page, prefer=None):
+    """Делает searchObjectsV2, подбирая формат входных данных.
+
+    Возвращает (shape, body, errors): shape — имя сработавшего формата (или None),
+    body — тело ответа (dict) либо None, errors — что вернул сервер по пути."""
+    seen_errors = []
+    variants = _data_variants(where, page)
+    if prefer:  # если формат уже известен по 1-й странице — используем только его
+        variants = [(n, d) for (n, d) in variants if n == prefer]
+    for name, data in variants:
+        try:
+            payload, errors = _gql("searchObjectsV2", SEARCH_QUERY, {"data": data})
+        except Exception as exc:  # noqa: BLE001
+            seen_errors.append(f"{name}: {exc}")
+            continue
+        if errors:
+            seen_errors.append(f"{name}: {'; '.join(errors)}")
+            continue
+        body = (payload.get("searchObjectsV2") or {}).get("body")
+        if body and (body.get("results") is not None):
+            return name, body, seen_errors
+    return None, None, seen_errors
+
+
 def fetch_address(street_query, house, address_label):
     """Собирает объявления realt по одному адресу. Возвращает (listings, warnings)."""
     uuids, warnings = resolve_street_uuids(street_query)
@@ -205,24 +252,21 @@ def fetch_address(street_query, house, address_label):
         return [], warnings
 
     listings, seen = [], set()
-    address_filter = [{"streetUuid": u} for u in uuids]
+    where = {"addressV2": [{"streetUuid": u} for u in uuids]}
+    shape = None
     for page in range(1, MAX_PAGES + 1):
-        variables = {"data": {"where": {"addressV2": address_filter}, "pageSize": PAGE_SIZE, "page": page}}
-        try:
-            data = _gql("searchObjectsV2", SEARCH_QUERY, variables)
-        except Exception as exc:  # noqa: BLE001
-            warnings.append(f"realt «{address_label}»: страница {page} не загрузилась ({exc})")
+        shape, body, errors = _search(where, page, prefer=shape)
+        if body is None:
+            if page == 1:
+                detail = f" ({'; '.join(errors)})" if errors else ""
+                warnings.append(f"realt «{address_label}»: поиск объектов не отработал{detail}")
             break
 
-        body = ((data.get("searchObjectsV2") or {}).get("body")) or {}
         results = body.get("results") or []
-        if not results:
-            break
-        rates = _rate_map(body.get("rates"))
-
         new_uuids = {r.get("uuid") for r in results} - seen
         if not new_uuids:
-            break  # пагинация зациклилась (сервер игнорит page) — выходим
+            break  # пусто или пагинация зациклилась (сервер игнорит номер страницы)
+        rates = _rate_map(body.get("rates"))
         for obj in results:
             uuid = obj.get("uuid")
             if uuid in seen:
@@ -233,8 +277,8 @@ def fetch_address(street_query, house, address_label):
                 listings.append(parsed)
 
         total = (body.get("pagination") or {}).get("totalCount") or 0
-        if len(seen) >= total:
-            break
+        if shape not in PAGED_SHAPES or len(seen) >= total or not results:
+            break  # формат без постраничности или всё уже собрали
         time.sleep(PAGE_PAUSE_SEC)
 
     return listings, warnings
