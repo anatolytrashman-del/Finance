@@ -3,11 +3,12 @@ import plotly.express as px
 import streamlit as st
 
 from config import MONITORED_ADDRESSES
-from market_kufar import fetch_all
+from market_kufar import fetch_all as fetch_kufar
+from market_realt import fetch_all as fetch_realt
 from market_store import append_history_snapshot, load_history, load_listings, save_listings
 
 st.title("🏷️ Рынок: объявления по моим адресам")
-st.caption("Источник: kufar.by · " + " · ".join(a["label"] for a in MONITORED_ADDRESSES))
+st.caption("Источники: kufar.by, realt.by · " + " · ".join(a["label"] for a in MONITORED_ADDRESSES))
 
 
 def _fmt_money(v):
@@ -36,8 +37,21 @@ def _summary_rows(df):
 
 
 def _refresh():
+    listings, warnings = [], []
     with st.spinner("Собираю объявления с kufar.by (10–30 секунд)..."):
-        listings, warnings = fetch_all(MONITORED_ADDRESSES)
+        k_listings, k_warnings = fetch_kufar(MONITORED_ADDRESSES)
+    for l in k_listings:
+        l["source"] = "kufar.by"
+    listings += k_listings
+    warnings += k_warnings
+
+    with st.spinner("Собираю объявления с realt.by (10–30 секунд)..."):
+        r_listings, r_warnings = fetch_realt(MONITORED_ADDRESSES)
+    for l in r_listings:
+        l["source"] = "realt.by"
+    listings += r_listings
+    warnings += r_warnings
+
     if listings:
         cache = save_listings(listings, warnings)
         append_history_snapshot(_summary_rows(pd.DataFrame(listings)))
@@ -49,7 +63,7 @@ def _refresh():
         )
 
 
-if st.button("🔄 Обновить объявления с kufar.by", type="primary"):
+if st.button("🔄 Обновить объявления (kufar.by + realt.by)", type="primary"):
     st.session_state.pop("market_error", None)
     _refresh()
     st.rerun()
@@ -112,16 +126,19 @@ for addr in MONITORED_ADDRESSES:
         table = table.sort_values(["deal", "category", "ppm"])
         table["Цена"] = table["price_usd"].apply(_fmt_money)
         table["Цена метра"] = table["ppm"].apply(lambda v: _fmt_money(v) if pd.notna(v) else "—")
+        if "source" not in table.columns:
+            table["source"] = "kufar.by"
         table = table.rename(
             columns={
                 "deal": "Сделка",
                 "category": "Категория",
+                "source": "Источник",
                 "title": "Заголовок",
                 "area": "Площадь, м²",
                 "listed_at": "Размещено",
                 "link": "Ссылка",
             }
-        )[["Сделка", "Категория", "Заголовок", "Площадь, м²", "Цена", "Цена метра", "Размещено", "Ссылка"]]
+        )[["Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²", "Цена", "Цена метра", "Размещено", "Ссылка"]]
         st.dataframe(
             table,
             width="stretch",
