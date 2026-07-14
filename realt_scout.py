@@ -48,10 +48,7 @@ def main():
     summary = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            executable_path="/opt/pw-browsers/chromium",
-            headless=True,
-        )
+        browser = p.chromium.launch(headless=True)
         ctx = browser.new_page(
             viewport={"width": 1400, "height": 1000},
             user_agent=(
