@@ -1,12 +1,22 @@
 import uuid
+from datetime import date
 
+import pandas as pd
 import streamlit as st
 
+import config
+from data_source import load_deals, load_real_estate
 from finmodel_store import (
     load_finmodels,
     load_sale_finmodels,
     save_finmodels,
     save_sale_finmodels,
+)
+from sale_finmodel import (
+    SALE_TAX_BASES,
+    compute_sale,
+    object_choices,
+    pull_payments,
 )
 
 st.title("🧮 Финмодель")
@@ -177,12 +187,10 @@ else:
 # =========================== ФИНМОДЕЛЬ ПРОДАЖИ ===========================
 st.divider()
 st.header("💰 Продажа")
-
-SALE_TAX_BASES = ["От полной суммы продажи", "От прибыли"]
-MONTHS = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-]
+st.caption(
+    "Доходность считается через XIRR — с учётом графика платежей (рассрочка), "
+    "а не только итоговых сумм. Для своих объектов график можно подтянуть из «Сделок»."
+)
 
 if "sale_finmodels" not in st.session_state:
     st.session_state["sale_finmodels"] = load_sale_finmodels()
@@ -192,97 +200,126 @@ sale_models = st.session_state["sale_finmodels"]
 
 def _fmt_profit(v):
     """Деньги со знаком: убыток показываем как -$5 000."""
+    if v is None:
+        return "—"
     sign = "-" if v < 0 else ""
     return f"{sign}${abs(v):,.0f}".replace(",", " ")
 
 
-def _holding_years(m):
-    by, bm = m.get("buy_year"), m.get("buy_month")
-    sy, sm = m.get("sell_year"), m.get("sell_month")
-    if not all(isinstance(x, int) for x in (by, bm, sy, sm)):
-        return None
-    months = (sy - by) * 12 + (sm - bm)
-    return months / 12 if months > 0 else None
+def _payments_to_df(payments):
+    rows = []
+    for p in payments or []:
+        try:
+            d = pd.to_datetime(p.get("date")).date()
+        except Exception:  # noqa: BLE001
+            d = None
+        rows.append({"Дата платежа": d, "Сумма, $": float(p.get("amount") or 0)})
+    if not rows:
+        rows = [{"Дата платежа": date.today().replace(day=1), "Сумма, $": 0.0}]
+    return pd.DataFrame(rows)
 
 
-def compute_sale(m):
-    buy = m.get("buy_price", 0) or 0
-    sell = m.get("sell_price", 0) or 0
-    tax_pct = m.get("tax_pct", 0) or 0
-    tax_base = m.get("tax_base", SALE_TAX_BASES[0])
-
-    gross = sell - buy
-    if tax_base == SALE_TAX_BASES[1]:  # от прибыли (только с положительной прибыли)
-        tax = max(gross, 0) * tax_pct / 100
-    else:  # от полной суммы продажи
-        tax = sell * tax_pct / 100
-    net = gross - tax
-    proceeds = sell - tax  # сумма на руки после налога
-
-    total_return = net / buy * 100 if buy > 0 else None
-    years = _holding_years(m)
-    if buy > 0 and years and proceeds > 0:
-        cagr = ((proceeds / buy) ** (1 / years) - 1) * 100
-    else:
-        cagr = None
-    simple_annual = total_return / years if total_return is not None and years else None
-    return {
-        "gross": gross,
-        "tax": tax,
-        "net": net,
-        "proceeds": proceeds,
-        "total_return": total_return,
-        "years": years,
-        "cagr": cagr,
-        "simple_annual": simple_annual,
-    }
+def _df_to_payments(df):
+    payments = []
+    for _, row in df.iterrows():
+        d, amount = row.get("Дата платежа"), row.get("Сумма, $")
+        if pd.isna(d) or pd.isna(amount) or float(amount) <= 0:
+            continue
+        payments.append({"date": pd.to_datetime(d).date().isoformat(), "amount": float(amount)})
+    payments.sort(key=lambda p: p["date"])
+    return payments
 
 
-def _render_sale_fields(d):
-    st.markdown("**Цены**")
+def _schedule_editor(prefix, payments):
+    """Редактируемая таблица платежей. Возвращает список {date, amount}."""
+    edited = st.data_editor(
+        _payments_to_df(payments),
+        key=f"{prefix}_payments",
+        num_rows="dynamic",
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Дата платежа": st.column_config.DateColumn("Дата платежа", format="DD.MM.YYYY"),
+            "Сумма, $": st.column_config.NumberColumn("Сумма, $", min_value=0.0, step=1000.0, format="%.0f"),
+        },
+    )
+    return _df_to_payments(edited)
+
+
+def _sale_sell_tax_fields(prefix, d):
+    st.markdown("**Продажа**")
     c1, c2 = st.columns(2)
-    buy_price = c1.number_input("Цена покупки, $", min_value=0.0, value=float(d.get("buy_price", 0)), step=1000.0)
-    sell_price = c2.number_input("Цена продажи, $", min_value=0.0, value=float(d.get("sell_price", 0)), step=1000.0)
-
-    st.markdown("**Даты (месяц-год)**")
-    d1, d2, d3, d4 = st.columns(4)
-    buy_month = d1.selectbox(
-        "Месяц покупки", MONTHS,
-        index=(d.get("buy_month") - 1) if isinstance(d.get("buy_month"), int) else 0,
+    sell_price = c1.number_input(
+        "Цена продажи, $", min_value=0.0, value=float(d.get("sell_price", 0)), step=1000.0, key=f"{prefix}_sell",
     )
-    buy_year = d2.number_input(
-        "Год покупки", min_value=1990, max_value=2100,
-        value=int(d.get("buy_year") or 2024), step=1,
-    )
-    sell_month = d3.selectbox(
-        "Месяц продажи", MONTHS,
-        index=(d.get("sell_month") - 1) if isinstance(d.get("sell_month"), int) else 0,
-    )
-    sell_year = d4.number_input(
-        "Год продажи", min_value=1990, max_value=2100,
-        value=int(d.get("sell_year") or 2025), step=1,
-    )
+    default_sell_date = date.today()
+    if d.get("sell_date"):
+        try:
+            default_sell_date = pd.to_datetime(d["sell_date"]).date()
+        except Exception:  # noqa: BLE001
+            pass
+    sell_date = c2.date_input("Дата продажи", value=default_sell_date, format="DD.MM.YYYY", key=f"{prefix}_selldate")
 
     st.markdown("**Налог на продажу**")
     t1, t2 = st.columns([1, 2])
-    tax_pct = t1.number_input("Ставка налога, %", min_value=0.0, max_value=100.0, value=float(d.get("tax_pct", 0)), step=1.0)
-    tax_base = t2.radio(
-        "Считать налог",
-        SALE_TAX_BASES,
-        horizontal=True,
-        index=SALE_TAX_BASES.index(d.get("tax_base")) if d.get("tax_base") in SALE_TAX_BASES else 0,
+    tax_pct = t1.number_input(
+        "Ставка налога, %", min_value=0.0, max_value=100.0,
+        value=float(d.get("tax_pct", 0)), step=1.0, key=f"{prefix}_taxpct",
     )
+    tax_base = t2.radio(
+        "Считать налог", SALE_TAX_BASES, horizontal=True,
+        index=SALE_TAX_BASES.index(d.get("tax_base")) if d.get("tax_base") in SALE_TAX_BASES else 0,
+        key=f"{prefix}_taxbase",
+    )
+    return {"sell_price": sell_price, "sell_date": sell_date.isoformat(), "tax_pct": tax_pct, "tax_base": tax_base}
 
-    return {
-        "buy_price": buy_price,
-        "sell_price": sell_price,
-        "buy_month": MONTHS.index(buy_month) + 1,
-        "buy_year": int(buy_year),
-        "sell_month": MONTHS.index(sell_month) + 1,
-        "sell_year": int(sell_year),
-        "tax_pct": tax_pct,
-        "tax_base": tax_base,
-    }
+
+def _registry_prefill(prefix):
+    """Блок «Мой объект»: выбор объекта из реестра, подтягивание взносов из «Сделок»
+    и дата погашения остатка. Пишет подтянутый график в session_state['{prefix}_prefill']."""
+    real_estate = load_real_estate()
+    deals = load_deals()
+    if real_estate is None or deals is None:
+        st.info("Чтобы подтянуть объект из реестра, нажми «🔄 Обновить данные» в боковой панели.")
+        return
+    choices = object_choices(real_estate)
+    if not choices:
+        st.warning("В листе «Real Estate» не найдено объектов.")
+        return
+
+    labels = [c["label"] for c in choices]
+    idx = st.selectbox("Объект из реестра", range(len(labels)), format_func=lambda i: labels[i], key=f"{prefix}_obj")
+    chosen = choices[idx]
+    payments = pull_payments(deals, chosen["key"])
+    paid = sum(p["amount"] for p in payments)
+    total = chosen["total_purchase"]
+
+    c1, c2 = st.columns(2)
+    c1.metric("Подтянуто взносов", f"{len(payments)} на {_fmt_profit(paid)}")
+    c2.metric("Полная цена покупки", _fmt_profit(total) if total else "—")
+
+    if not payments:
+        st.warning(
+            f"По объекту «{chosen['key']}» не найдено платежей «Покупка» в «Сделках». "
+            f"Проверь, что в «Сделках» столбец «{config.DEALS_OBJECT_COLUMN}» "
+            f"(или «{config.DEALS_PURPOSE_COLUMN}») содержит это имя."
+        )
+
+    remaining = None
+    if total is not None:
+        remaining = max(total - paid, 0.0)
+    r1, r2 = st.columns(2)
+    payoff_date = r1.date_input("Дата погашения остатка", value=date.today(), format="DD.MM.YYYY", key=f"{prefix}_payoff")
+    r2.metric("Остаток к погашению", _fmt_profit(remaining) if remaining is not None else "остаток = цена − взносы")
+
+    schedule = list(payments)
+    if remaining and remaining > 0:
+        schedule.append({"date": payoff_date.isoformat(), "amount": remaining})
+    if st.button("⤵️ Подставить график из реестра в таблицу ниже", key=f"{prefix}_apply"):
+        st.session_state[f"{prefix}_prefill"] = schedule
+        # сбрасываем состояние редактора, иначе он игнорирует новые данные
+        st.session_state.pop(f"{prefix}_payments", None)
+        st.rerun()
 
 
 def _sale_metrics_and_recap(m):
@@ -290,41 +327,47 @@ def _sale_metrics_and_recap(m):
     cols = st.columns(3)
     cols[0].metric("Чистая прибыль", _fmt_profit(r["net"]))
     cols[1].metric("Доходность за всё время", f"{r['total_return']:.1f}%" if r["total_return"] is not None else "—")
-    cols[2].metric("Доходность в год", f"{r['cagr']:.1f}%" if r["cagr"] is not None else "—")
+    cols[2].metric("Доходность в год (XIRR)", f"{r['annual']:.1f}%" if r["annual"] is not None else "—")
 
-    def _month_year(month, year):
-        if isinstance(month, int) and isinstance(year, int):
-            return f"{MONTHS[month - 1]} {year}"
-        return "—"
-
-    period = "—"
-    if r["years"]:
-        period = f"{r['years']:.1f} лет"
-    tax_str = f"{m.get('tax_pct', 0):g}% ({m.get('tax_base', SALE_TAX_BASES[0]).lower()})"
+    period = f"{r['years']:.1f} лет" if r["years"] else "—"
+    n_pay = len(m.get("payments") or [])
+    tax_str = f"{m.get('tax_pct', 0):g}% ({str(m.get('tax_base', SALE_TAX_BASES[0])).lower()})"
     recap = (
-        f"Покупка {_fmt_profit(m.get('buy_price', 0))} ({_month_year(m.get('buy_month'), m.get('buy_year'))}) → "
-        f"продажа {_fmt_profit(m.get('sell_price', 0))} ({_month_year(m.get('sell_month'), m.get('sell_year'))}) · "
-        f"срок {period} · "
-        f"налог {tax_str} = {_fmt_profit(r['tax'])} · "
-        f"на руки после налога {_fmt_profit(r['proceeds'])}"
+        f"Вложено {_fmt_profit(r['total_invested'])} за {n_pay} платеж(ей) · "
+        f"продажа {_fmt_profit(r['sell'])} · срок {period} · "
+        f"налог {tax_str} = {_fmt_profit(r['tax'])} · на руки {_fmt_profit(r['proceeds'])}"
     )
-    if r["simple_annual"] is not None:
-        recap += f" · простая доходность {r['simple_annual']:.1f}%/год"
     st.caption(recap.replace("$", r"\$"))
 
 
-# --- Форма добавления (продажа) ---
+def _sale_form(prefix, d):
+    """Полный ввод проекта продажи. Возвращает dict полей (без name/id)."""
+    use_registry = st.checkbox("🏠 Мой объект — подтянуть график из реестра", key=f"{prefix}_useobj")
+    if use_registry:
+        _registry_prefill(prefix)
+
+    st.markdown("**График платежей (вложения)**")
+    st.caption("Каждая строка — дата и сумма взноса. Строки можно добавлять и удалять.")
+    payments = st.session_state.get(f"{prefix}_prefill", d.get("payments"))
+    payments = _schedule_editor(prefix, payments)
+
+    sell_tax = _sale_sell_tax_fields(prefix, d)
+    return {"payments": payments, **sell_tax}
+
+
+# --- Добавление проекта продажи ---
 with st.expander("➕ Добавить проект продажи", expanded=not sale_models):
-    with st.form("add_sale_model", clear_on_submit=True):
-        s_name = st.text_input("Название проекта")
-        s_vals = _render_sale_fields({})
-        if st.form_submit_button("Добавить"):
-            if s_name.strip():
-                st.session_state["sale_finmodels"].append({"id": str(uuid.uuid4()), "name": s_name.strip(), **s_vals})
-                save_sale_finmodels(st.session_state["sale_finmodels"])
-                st.rerun()
-            else:
-                st.warning("Укажи название проекта.")
+    add_name = st.text_input("Название проекта", key="add_sale_name")
+    add_vals = _sale_form("add_sale", {})
+    if st.button("Добавить проект продажи", key="add_sale_submit"):
+        if add_name.strip():
+            st.session_state["sale_finmodels"].append({"id": str(uuid.uuid4()), "name": add_name.strip(), **add_vals})
+            save_sale_finmodels(st.session_state["sale_finmodels"])
+            for k in [key for key in st.session_state if str(key).startswith("add_sale")]:
+                st.session_state.pop(k, None)  # сброс формы добавления
+            st.rerun()
+        else:
+            st.warning("Укажи название проекта.")
 
 # --- Список проектов продажи ---
 if not sale_models:
@@ -336,21 +379,23 @@ else:
     for m in sale_models:
         with st.container(border=True):
             if sale_editing_id == m["id"]:
-                with st.form(f"edit_sale_{m['id']}"):
-                    e_name = st.text_input("Название проекта", value=m.get("name", ""))
-                    e_vals = _render_sale_fields(m)
-                    b_save, b_cancel = st.columns(2)
-                    if b_save.form_submit_button("💾 Сохранить"):
-                        if e_name.strip():
-                            m.update({"name": e_name.strip(), **e_vals})
-                            save_sale_finmodels(st.session_state["sale_finmodels"])
-                            st.session_state["sale_fm_editing_id"] = None
-                            st.rerun()
-                        else:
-                            st.warning("Укажи название проекта.")
-                    if b_cancel.form_submit_button("Отмена"):
+                prefix = f"edit_sale_{m['id']}"
+                e_name = st.text_input("Название проекта", value=m.get("name", ""), key=f"{prefix}_name")
+                e_vals = _sale_form(prefix, m)
+                b_save, b_cancel = st.columns(2)
+                if b_save.button("💾 Сохранить", key=f"{prefix}_save"):
+                    if e_name.strip():
+                        m.update({"name": e_name.strip(), **e_vals})
+                        save_sale_finmodels(st.session_state["sale_finmodels"])
+                        st.session_state.pop(f"{prefix}_prefill", None)
                         st.session_state["sale_fm_editing_id"] = None
                         st.rerun()
+                    else:
+                        st.warning("Укажи название проекта.")
+                if b_cancel.button("Отмена", key=f"{prefix}_cancel"):
+                    st.session_state.pop(f"{prefix}_prefill", None)
+                    st.session_state["sale_fm_editing_id"] = None
+                    st.rerun()
             else:
                 head, edit_btn, del_btn = st.columns([8, 1, 1])
                 safe_name = str(m.get("name", "Проект")).replace("$", r"\$")
