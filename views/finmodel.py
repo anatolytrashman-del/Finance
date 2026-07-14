@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import config
-from data_source import load_deals, load_real_estate
+from data_source import load_deals, load_real_estate, sidebar_refresh_control
 from finmodel_store import (
     load_finmodels,
     load_sale_finmodels,
@@ -18,6 +18,8 @@ from sale_finmodel import (
     object_choices,
     pull_payments,
 )
+
+sidebar_refresh_control()
 
 st.title("🧮 Финмодель")
 st.header("🏠 Аренда")
@@ -282,6 +284,21 @@ def _registry_prefill(prefix):
     if real_estate is None or deals is None:
         st.info("Чтобы подтянуть объект из реестра, нажми «🔄 Обновить данные» в боковой панели.")
         return
+    with st.expander("🔍 Диагностика связки (что видит приложение)", expanded=False):
+        if config.DEALS_OBJECT_COLUMN in deals.columns:
+            codes = sorted(deals[config.DEALS_OBJECT_COLUMN].dropna().astype(str).str.strip().unique())
+            st.write(f"Коды в «Сделки» → «{config.DEALS_OBJECT_COLUMN}»:", codes)
+        else:
+            st.error(f"В «Сделках» НЕТ столбца «{config.DEALS_OBJECT_COLUMN}». "
+                     f"Столбцы: {list(deals.columns)}")
+        if config.REALESTATE_OBJECT_COLUMN in real_estate.columns:
+            re_codes = sorted(real_estate[config.REALESTATE_OBJECT_COLUMN].dropna().astype(str).str.strip().unique())
+            st.write(f"Коды в «Real Estate» → «{config.REALESTATE_OBJECT_COLUMN}»:", re_codes)
+        else:
+            st.error(f"В «Real Estate» НЕТ столбца «{config.REALESTATE_OBJECT_COLUMN}». "
+                     f"Столбцы: {list(real_estate.columns)}")
+        st.caption("Если столбцов нет — нажми «🔄 Обновить данные» в боковой панели (данные закэшированы до добавления столбца).")
+
     choices = object_choices(real_estate, deals)
     if not choices:
         st.warning("В листах «Real Estate»/«Сделки» не найдено объектов.")
