@@ -48,7 +48,7 @@ def main():
     OUT.mkdir(exist_ok=True)
     summary = []
     for street, house in ADDRESSES:
-        found_uuid = None
+        found_uuids = []
         for types in TYPE_VARIANTS:
             try:
                 resp = gql("multiGeoReferenceAgg", GEO_QUERY,
@@ -60,32 +60,44 @@ def main():
                 json.dumps(resp, ensure_ascii=False, indent=1), encoding="utf-8")
             streets = (((resp.get("data") or {}).get("multiGeoReferenceAgg") or {}).get("body") or {}).get("streets")
             if streets:
-                summary.append(f"geo '{street}' types={types}: " +
-                               str([f"{s.get('title')}(t{s.get('type')})" for s in streets[:5]]))
-                if not found_uuid:
-                    key = street.split()[-1].lower()
-                    match = next((s for s in streets if key in (s.get("title") or "").lower()), streets[0])
-                    found_uuid = match.get("uuid")
+                # берём улицы ТОЛЬКО в Минске (гео возвращает совпадения по всей стране)
+                minsk = [s for s in streets if (s.get("townName") or "") == "Минск"]
+                summary.append(f"geo '{street}' types={types}: минских улиц={len(minsk)} " +
+                               str([f"{s.get('title')}|{s.get('uuid')}" for s in minsk[:4]]))
+                for s in minsk:
+                    if s.get("uuid") not in found_uuids:
+                        found_uuids.append(s.get("uuid"))
             else:
                 summary.append(f"geo '{street}' types={types}: streets=none")
 
-        if found_uuid:
+        if found_uuids:
             try:
+                # запрашиваем сразу по всем минским uuid этой улицы
                 resp = gql("searchObjectsV2", SEARCH_QUERY,
-                           {"data": {"where": {"addressV2": [{"streetUuid": found_uuid}]}}})
+                           {"data": {"where": {"addressV2": [{"streetUuid": u} for u in found_uuids]}}})
                 (OUT / f"objects_{street.split()[-1]}.json").write_text(
                     json.dumps(resp, ensure_ascii=False, indent=1), encoding="utf-8")
                 b = (((resp.get("data") or {}).get("searchObjectsV2") or {}).get("body") or {})
                 results = b.get("results") or []
                 total = (b.get("pagination") or {}).get("totalCount")
+                # полный дамп по нашему дому
+                ours = [o for o in results if str(o.get("houseNumber")) == house]
+                dump = [{k: o.get(k) for k in (
+                    "category", "objectType", "houseNumber", "address", "price", "priceCurrency",
+                    "pricePerM2", "areaTotal", "rooms", "termOfLease", "leasePeriod", "code")} for o in ours]
+                (OUT / f"ourhouse_{street.split()[-1]}.json").write_text(
+                    json.dumps(dump, ensure_ascii=False, indent=1), encoding="utf-8")
                 cats = Counter((o.get("category"), o.get("objectType")) for o in results)
                 houses = Counter(str(o.get("houseNumber")) for o in results)
-                summary.append(f"OBJECTS '{street}' uuid={found_uuid} total={total} got={len(results)} "
-                               f"cats={dict(cats)} houses={dict(houses)}")
+                cats_ours = Counter((o.get("category"), o.get("objectType"), o.get("priceCurrency")) for o in ours)
+                summary.append(f"OBJECTS '{street}' uuids={found_uuids} total={total} got={len(results)}")
+                summary.append(f"   все дома: {dict(houses)}")
+                summary.append(f"   все cats: {dict(cats)}")
+                summary.append(f"   ДОМ {house}: {len(ours)} объектов, cats(cat,objType,cur)={dict(cats_ours)}")
             except Exception as exc:
                 summary.append(f"objects '{street}' -> ERROR: {exc}")
         else:
-            summary.append(f"!! streetUuid not found for '{street}'")
+            summary.append(f"!! минский streetUuid не найден для '{street}'")
 
     (OUT / "index.txt").write_text("\n".join(summary), encoding="utf-8")
     print("\n".join(summary))
