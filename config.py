@@ -40,5 +40,6 @@ DEALS_PURCHASE_VALUE = "Покупка"          # значение «Тип с�
 
 REALESTATE_OBJECT_COLUMN = "Объект"       # тот же ярлык в «Real Estate» (необязательно)
 REALESTATE_PURCHASE_COLUMN = "Сумма покупки в $"
+REALESTATE_MARKET_COLUMN = "Примерная рыночная стоимость в $"  # для модели «покупка + аренда»
 REALESTATE_TYPE_COLUMN = "Тип"
 REALESTATE_LOCATION_COLUMN = "Локация"

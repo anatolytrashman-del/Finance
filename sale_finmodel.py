@@ -149,14 +149,15 @@ def object_choices(real_estate_df, deals_df=None):
         for _, row in real_estate_df.iterrows():
             label = _object_label(row)
             total = parse_money(row.get(config.REALESTATE_PURCHASE_COLUMN))
+            market = parse_money(row.get(config.REALESTATE_MARKET_COLUMN))
             tag = row.get(config.REALESTATE_OBJECT_COLUMN)
             if isinstance(tag, str) and tag.strip():
                 nk = _norm_key(tag)
                 disp = f"{tag.strip()} · {label}"
-                by_norm[nk] = {"key": tag.strip(), "label": disp, "total_purchase": total}
+                by_norm[nk] = {"key": tag.strip(), "label": disp, "total_purchase": total, "market": market}
             else:  # объект без кода — ключом служит его ярлык
                 nk = _norm_key(label)
-                by_norm.setdefault(nk, {"key": label, "label": label, "total_purchase": total})
+                by_norm.setdefault(nk, {"key": label, "label": label, "total_purchase": total, "market": market})
 
     obj_col = config.DEALS_OBJECT_COLUMN
     if deals_df is not None and not deals_df.empty and obj_col in deals_df.columns:
@@ -166,10 +167,11 @@ def object_choices(real_estate_df, deals_df=None):
                 continue
             nk = _norm_key(code)
             if nk not in by_norm:  # код есть только в «Сделках»
-                by_norm[nk] = {"key": code, "label": f"{code} (только в «Сделках»)", "total_purchase": None}
+                by_norm[nk] = {"key": code, "label": f"{code} (только в «Сделках»)",
+                               "total_purchase": None, "market": None}
 
-    return [{"key": v["key"], "label": v["label"], "total_purchase": v["total_purchase"]}
-            for v in by_norm.values()]
+    return [{"key": v["key"], "label": v["label"], "total_purchase": v["total_purchase"],
+             "market": v.get("market")} for v in by_norm.values()]
 
 
 def pull_payments(deals_df, object_key):

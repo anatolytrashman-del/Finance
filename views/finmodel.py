@@ -6,9 +6,12 @@ import streamlit as st
 
 import config
 from data_source import load_deals, load_real_estate, sidebar_refresh_control
+from buyrent_finmodel import compute_buyrent
 from finmodel_store import (
+    load_buyrent_finmodels,
     load_finmodels,
     load_sale_finmodels,
+    save_buyrent_finmodels,
     save_finmodels,
     save_sale_finmodels,
 )
@@ -425,3 +428,180 @@ else:
                     save_sale_finmodels(st.session_state["sale_finmodels"])
                     st.rerun()
                 _sale_metrics_and_recap(m)
+
+
+# ======================= ПОКУПКА + СДАЧА В АРЕНДУ =======================
+st.divider()
+st.header("🏘️ Покупка + аренда")
+st.caption(
+    "Реальная доходность лота, где есть и рост стоимости, и арендный доход. "
+    "Годовая — через XIRR: вложения по датам, аренда помесячно, текущая "
+    "рыночная стоимость как «виртуальная продажа» сегодня."
+)
+
+if "buyrent_finmodels" not in st.session_state:
+    st.session_state["buyrent_finmodels"] = load_buyrent_finmodels()
+
+buyrent_models = st.session_state["buyrent_finmodels"]
+
+
+def _pct(v):
+    return f"{v:.1f}%" if v is not None else "—"
+
+
+def _date_or(d, key, fallback):
+    if d.get(key):
+        try:
+            return pd.to_datetime(d[key]).date()
+        except Exception:  # noqa: BLE001
+            pass
+    return fallback
+
+
+def _buyrent_registry_prefill(prefix):
+    real_estate = load_real_estate()
+    deals = load_deals()
+    if real_estate is None or deals is None:
+        st.info("Чтобы подтянуть объект из реестра, нажми «🔄 Обновить данные» в боковой панели.")
+        return
+    choices = object_choices(real_estate, deals)
+    if not choices:
+        st.warning("В листах «Real Estate»/«Сделки» не найдено объектов.")
+        return
+
+    labels = [c["label"] for c in choices]
+    idx = st.selectbox("Объект из реестра", range(len(labels)), format_func=lambda i: labels[i], key=f"{prefix}_obj")
+    chosen = choices[idx]
+    payments = pull_payments(deals, chosen["key"])
+    paid = sum(p["amount"] for p in payments)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Подтянуто взносов", f"{len(payments)} на {_fmt_profit(paid)}")
+    c2.metric("Цена покупки", _fmt_profit(chosen["total_purchase"]) if chosen["total_purchase"] else "—")
+    c3.metric("Рыночная стоимость", _fmt_profit(chosen.get("market")) if chosen.get("market") else "—")
+
+    if not payments:
+        st.warning(
+            f"По объекту «{chosen['key']}» не найдено платежей «Покупка» в «Сделках». "
+            f"Проверь столбец «{config.DEALS_OBJECT_COLUMN}» (или «{config.DEALS_PURPOSE_COLUMN}»)."
+        )
+    if st.button("⤵️ Подставить платежи и рыночную стоимость", key=f"{prefix}_apply"):
+        st.session_state[f"{prefix}_prefill"] = payments
+        if chosen.get("market") is not None:
+            st.session_state[f"{prefix}_market_prefill"] = float(chosen["market"])
+        st.session_state.pop(f"{prefix}_payments", None)
+        st.session_state.pop(f"{prefix}_market", None)
+        st.rerun()
+
+
+def _buyrent_form(prefix, d):
+    """Полный ввод проекта «покупка + аренда». Возвращает dict полей."""
+    use_registry = st.checkbox("🏠 Мой объект — подтянуть из реестра", key=f"{prefix}_useobj")
+    if use_registry:
+        _buyrent_registry_prefill(prefix)
+
+    st.markdown("**Платежи за покупку (вложения)**")
+    st.caption("Каждая строка — дата и сумма взноса. Строки можно добавлять и удалять.")
+    payments = st.session_state.get(f"{prefix}_prefill", d.get("payments"))
+    payments = _schedule_editor(prefix, payments)
+
+    st.markdown("**Ремонт**")
+    r1, r2 = st.columns(2)
+    reno = r1.number_input("Стоимость ремонта, $", min_value=0.0, value=float(d.get("reno", 0)), step=1000.0, key=f"{prefix}_reno")
+    reno_date = r2.date_input("Дата ремонта", value=_date_or(d, "reno_date", date.today()), format="DD.MM.YYYY", key=f"{prefix}_renodate")
+
+    st.markdown("**Аренда**")
+    a1, a2 = st.columns(2)
+    rent_month = a1.number_input("Чистая аренда, $/мес", min_value=0.0, value=float(d.get("rent_month", 0)), step=50.0, key=f"{prefix}_rent")
+    rent_start = a2.date_input("Дата сдачи в аренду", value=_date_or(d, "rent_start", date.today()), format="DD.MM.YYYY", key=f"{prefix}_rentstart")
+
+    st.markdown("**Текущая рыночная стоимость**")
+    market_default = st.session_state.get(f"{prefix}_market_prefill", d.get("market_value") or 0)
+    market_value = st.number_input("Рыночная стоимость сейчас, $", min_value=0.0, value=float(market_default or 0), step=1000.0, key=f"{prefix}_market")
+
+    return {
+        "payments": payments,
+        "reno": reno,
+        "reno_date": reno_date.isoformat(),
+        "rent_month": rent_month,
+        "rent_start": rent_start.isoformat(),
+        "market_value": market_value,
+    }
+
+
+def _buyrent_metrics(m):
+    r = compute_buyrent(m)
+    row1 = st.columns(3)
+    row1[0].metric("📈 Прирост стоимости", _fmt_profit(r["appreciation"]))
+    row1[1].metric("🏠 Прибыль от аренды в год", _fmt_profit(r["annual_rent"]))
+    row1[2].metric("📊 Доходность от роста", _pct(r["appr_return"]))
+    row2 = st.columns(3)
+    row2[0].metric("💵 Аренда суммарно (доходность)", _pct(r["rent_yield_cum"]))
+    row2[1].metric("🧮 Общая доходность (рост + аренда)", _pct(r["total_return"]))
+    row2[2].metric("📅 Годовая (XIRR)", _pct(r["annual"]))
+
+    period = f"{r['years']:.1f} лет" if r["years"] else "—"
+    recap = (
+        f"Вложено {_fmt_profit(r['invested'])} (покупка {_fmt_profit(r['invested_payments'])}"
+        f" + ремонт {_fmt_profit(r['reno'])}) · рыночная {_fmt_profit(r['market'])} · "
+        f"в аренде {r['months_rented']:.0f} мес → аренды получено {_fmt_profit(r['cumulative_rent'])} · "
+        f"срок проекта {period}"
+    )
+    st.caption(recap.replace("$", r"\$"))
+
+
+# --- Добавление проекта «покупка + аренда» ---
+with st.expander("➕ Добавить проект «покупка + аренда»", expanded=not buyrent_models):
+    add_name = st.text_input("Название проекта", key="add_buyrent_name")
+    add_vals = _buyrent_form("add_buyrent", {})
+    if st.button("Добавить проект", key="add_buyrent_submit"):
+        if add_name.strip():
+            st.session_state["buyrent_finmodels"].append({"id": str(uuid.uuid4()), "name": add_name.strip(), **add_vals})
+            save_buyrent_finmodels(st.session_state["buyrent_finmodels"])
+            for k in [key for key in st.session_state if str(key).startswith("add_buyrent")]:
+                st.session_state.pop(k, None)
+            st.rerun()
+        else:
+            st.warning("Укажи название проекта.")
+
+# --- Список проектов «покупка + аренда» ---
+if not buyrent_models:
+    st.info("Пока нет проектов. Добавь первый через «➕ Добавить проект «покупка + аренда»» выше.")
+else:
+    st.caption(f"Проектов: {len(buyrent_models)}")
+    buyrent_editing_id = st.session_state.get("buyrent_fm_editing_id")
+
+    for m in buyrent_models:
+        with st.container(border=True):
+            if buyrent_editing_id == m["id"]:
+                prefix = f"edit_buyrent_{m['id']}"
+                e_name = st.text_input("Название проекта", value=m.get("name", ""), key=f"{prefix}_name")
+                e_vals = _buyrent_form(prefix, m)
+                b_save, b_cancel = st.columns(2)
+                if b_save.button("💾 Сохранить", key=f"{prefix}_save"):
+                    if e_name.strip():
+                        m.update({"name": e_name.strip(), **e_vals})
+                        save_buyrent_finmodels(st.session_state["buyrent_finmodels"])
+                        st.session_state.pop(f"{prefix}_prefill", None)
+                        st.session_state.pop(f"{prefix}_market_prefill", None)
+                        st.session_state["buyrent_fm_editing_id"] = None
+                        st.rerun()
+                    else:
+                        st.warning("Укажи название проекта.")
+                if b_cancel.button("Отмена", key=f"{prefix}_cancel"):
+                    st.session_state.pop(f"{prefix}_prefill", None)
+                    st.session_state.pop(f"{prefix}_market_prefill", None)
+                    st.session_state["buyrent_fm_editing_id"] = None
+                    st.rerun()
+            else:
+                head, edit_btn, del_btn = st.columns([8, 1, 1])
+                safe_name = str(m.get("name", "Проект")).replace("$", r"\$")
+                head.markdown(f"### {safe_name}")
+                if edit_btn.button("✏️", key=f"buyrent_fm_edit_{m['id']}", help="Редактировать проект"):
+                    st.session_state["buyrent_fm_editing_id"] = m["id"]
+                    st.rerun()
+                if del_btn.button("🗑", key=f"buyrent_fm_del_{m['id']}", help="Удалить проект"):
+                    st.session_state["buyrent_finmodels"] = [x for x in buyrent_models if x["id"] != m["id"]]
+                    save_buyrent_finmodels(st.session_state["buyrent_finmodels"])
+                    st.rerun()
+                _buyrent_metrics(m)

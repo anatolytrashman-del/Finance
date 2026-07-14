@@ -6,6 +6,7 @@ from pathlib import Path
 
 FINMODELS_PATH = Path.home() / ".trashman_family_office" / "finmodels.json"
 SALE_FINMODELS_PATH = Path.home() / ".trashman_family_office" / "sale_finmodels.json"
+BUYRENT_FINMODELS_PATH = Path.home() / ".trashman_family_office" / "buyrent_finmodels.json"
 
 
 def _load(path):
@@ -38,3 +39,11 @@ def load_sale_finmodels():
 
 def save_sale_finmodels(models):
     _save(SALE_FINMODELS_PATH, models)
+
+
+def load_buyrent_finmodels():
+    return _load(BUYRENT_FINMODELS_PATH)
+
+
+def save_buyrent_finmodels(models):
+    _save(BUYRENT_FINMODELS_PATH, models)
