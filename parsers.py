@@ -1,6 +1,5 @@
 """Разбор листов книги в pandas DataFrame."""
 import re
-from datetime import date
 
 import pandas as pd
 
@@ -224,12 +223,15 @@ def _bal_currency(label, orig, usd, eur, rub):
     return ""
 
 
-def _parse_balance_ws(ws) -> dict:
-    """Баланс одного месячного среза (лист вида «14 июля 2026»).
+def parse_balance(wb) -> dict:
+    """Баланс с последнего месячного среза (лист вида «14 июля 2026»).
 
     Активы читаются из столбцов A/B/C (актив / в валюте / в $), обязательства —
     из G/H/I. Строки ищутся по названию, а не по номеру, чтобы страница не
     ломалась при добавлении/удалении объектов."""
+    ws = _find_latest_snapshot_sheet(wb)
+    if ws is None:
+        return None
 
     rows = []
     for r in range(1, ws.max_row + 1):
@@ -329,60 +331,6 @@ def _parse_balance_ws(ws) -> dict:
         "grand_total": grand_total,
         "rates": {"eur": eur, "rub": rub},
     }
-
-
-_BALANCE_ASSET_KEYS = ("bank", "cash", "crypto", "returns", "loans", "real_estate", "art", "business")
-
-
-def parse_balance(wb) -> dict:
-    """Баланс с последнего месячного среза."""
-    ws = _find_latest_snapshot_sheet(wb)
-    return _parse_balance_ws(ws) if ws is not None else None
-
-
-def balance_totals(b) -> dict:
-    """Агрегаты по балансу: активы, ярусы ликвидности, обязательства, капитал."""
-    def s(key):
-        return sum((i["usd"] or 0) for i in (b.get(key) or []))
-
-    assets = sum(s(k) for k in _BALANCE_ASSET_KEYS)
-    liquid = s("bank") + s("cash") + s("crypto")
-    receivables = s("returns") + s("loans")
-    obligations = b.get("obligations_total")
-    if obligations is None:
-        obligations = sum((i["usd"] or 0) for i in (b.get("obligations") or []))
-    obligations = -abs(obligations or 0)
-    return {
-        "assets": assets,
-        "liquid": liquid,
-        "receivables": receivables,
-        "longterm": assets - liquid - receivables,
-        "obligations": obligations,
-        "net": assets + obligations,
-        "frozen": s("frozen"),
-    }
-
-
-def parse_balance_history(wb) -> list:
-    """История балансов по ВСЕМ месячным срезам книги (листы «14 июля 2026»...).
-
-    Возвращает список снапшотов по возрастанию даты: {date, sheet, assets,
-    liquid, receivables, longterm, obligations, net, frozen, grand_total}."""
-    out = []
-    for name in wb.sheetnames:
-        key = _sheet_sort_key(name)
-        if key is None:
-            continue
-        try:
-            b = _parse_balance_ws(wb[name])
-            totals = balance_totals(b)
-        except Exception:  # noqa: BLE001 — старые срезы могут иметь другую структуру
-            continue
-        year, month, day = key
-        out.append({"date": date(year, month, day), "sheet": name.strip(),
-                    "grand_total": b.get("grand_total"), **totals})
-    out.sort(key=lambda r: r["date"])
-    return out
 
 
 def parse_asset_allocation(wb) -> pd.DataFrame:
