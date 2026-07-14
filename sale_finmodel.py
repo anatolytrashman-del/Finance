@@ -5,6 +5,7 @@
 позже (рассрочка), «работает» меньше, поэтому реальная годовая доходность
 считается через XIRR по всем движениям денег с их датами.
 """
+import re
 from datetime import date, datetime
 
 import pandas as pd
@@ -13,6 +14,17 @@ import config
 from parsers import parse_money
 
 SALE_TAX_BASES = ["От полной суммы продажи", "От прибыли"]
+
+# Кириллические буквы, визуально совпадающие с латинскими — сводим к латинице,
+# чтобы код «Т1639» (кир.) и «T1639» (лат.) считались одним объектом.
+_CYR_TO_LAT = str.maketrans("АВЕКМНОРСТУХ", "ABEKMHOPCTYX")
+
+
+def _norm_key(value):
+    """Нормализует код объекта: регистр, пробелы, кириллица→латиница."""
+    if value is None:
+        return ""
+    return re.sub(r"\s+", "", str(value).strip().upper().translate(_CYR_TO_LAT))
 
 
 # --------------------------- XIRR ---------------------------
@@ -118,36 +130,53 @@ def compute_sale(m):
 # --------------------------- Реестр сделок ---------------------------
 
 def _object_label(row):
-    obj = row.get(config.REALESTATE_OBJECT_COLUMN)
-    if isinstance(obj, str) and obj.strip():
-        return obj.strip()
+    """Человеческое имя объекта: «Тип — Локация» (код «Объект» тут не участвует)."""
     parts = [str(row.get(config.REALESTATE_TYPE_COLUMN) or "").strip(),
              str(row.get(config.REALESTATE_LOCATION_COLUMN) or "").strip()]
     return " — ".join(p for p in parts if p) or "Объект"
 
 
-def object_choices(real_estate_df):
+def object_choices(real_estate_df, deals_df=None):
     """Список объектов для выбора: [{key, label, total_purchase}].
 
-    key — точное имя-ярлык (столбец «Объект») либо «Тип — Локация»; по нему ищем
-    платежи в «Сделках». total_purchase — «Сумма покупки в $» (для остатка."""
-    choices = []
-    if real_estate_df is None or real_estate_df.empty:
-        return choices
-    for _, row in real_estate_df.iterrows():
-        label = _object_label(row)
-        obj_tag = row.get(config.REALESTATE_OBJECT_COLUMN)
-        key = obj_tag.strip() if isinstance(obj_tag, str) and obj_tag.strip() else label
-        total = parse_money(row.get(config.REALESTATE_PURCHASE_COLUMN))
-        choices.append({"key": key, "label": label, "total_purchase": total})
-    return choices
+    Ключи-коды берутся из столбца «Объект» ОБОИХ листов (объединение), поэтому
+    объект виден, даже если код проставлен только в «Сделках». Сравнение —
+    через _norm_key (устойчиво к латинице/кириллице). total_purchase —
+    «Сумма покупки в $» из «Real Estate» (нужна для расчёта остатка)."""
+    by_norm = {}  # norm -> {key, label, total}
+
+    if real_estate_df is not None and not real_estate_df.empty:
+        for _, row in real_estate_df.iterrows():
+            label = _object_label(row)
+            total = parse_money(row.get(config.REALESTATE_PURCHASE_COLUMN))
+            tag = row.get(config.REALESTATE_OBJECT_COLUMN)
+            if isinstance(tag, str) and tag.strip():
+                nk = _norm_key(tag)
+                disp = f"{tag.strip()} · {label}"
+                by_norm[nk] = {"key": tag.strip(), "label": disp, "total_purchase": total}
+            else:  # объект без кода — ключом служит его ярлык
+                nk = _norm_key(label)
+                by_norm.setdefault(nk, {"key": label, "label": label, "total_purchase": total})
+
+    obj_col = config.DEALS_OBJECT_COLUMN
+    if deals_df is not None and not deals_df.empty and obj_col in deals_df.columns:
+        for value in deals_df[obj_col].dropna().unique():
+            code = str(value).strip()
+            if not code:
+                continue
+            nk = _norm_key(code)
+            if nk not in by_norm:  # код есть только в «Сделках»
+                by_norm[nk] = {"key": code, "label": f"{code} (только в «Сделках»)", "total_purchase": None}
+
+    return [{"key": v["key"], "label": v["label"], "total_purchase": v["total_purchase"]}
+            for v in by_norm.values()]
 
 
 def pull_payments(deals_df, object_key):
     """Взносы «Покупка» по объекту из «Сделок» -> [{date: iso, amount: float}].
 
-    Сначала пытаемся точное совпадение по столбцу-ярлыку (DEALS_OBJECT_COLUMN),
-    иначе ищем имя объекта по вхождению в текст DEALS_PURPOSE_COLUMN."""
+    Точное совпадение по нормализованному коду в DEALS_OBJECT_COLUMN, иначе —
+    поиск кода по вхождению в текст DEALS_PURPOSE_COLUMN."""
     if deals_df is None or deals_df.empty or not object_key:
         return []
     df = deals_df
@@ -157,13 +186,13 @@ def pull_payments(deals_df, object_key):
     if df.empty:
         return []
 
-    key = str(object_key).strip().lower()
+    key_norm = _norm_key(object_key)
     obj_col = config.DEALS_OBJECT_COLUMN
     purpose_col = config.DEALS_PURPOSE_COLUMN
     if obj_col in df.columns and df[obj_col].notna().any():
-        mask = df[obj_col].apply(lambda v: str(v).strip().lower() == key if pd.notna(v) else False)
+        mask = df[obj_col].apply(lambda v: _norm_key(v) == key_norm if pd.notna(v) else False)
     elif purpose_col in df.columns:
-        mask = df[purpose_col].apply(lambda v: key in str(v).lower() if pd.notna(v) else False)
+        mask = df[purpose_col].apply(lambda v: key_norm in _norm_key(v) if pd.notna(v) else False)
     else:
         return []
 
@@ -171,7 +200,8 @@ def pull_payments(deals_df, object_key):
     date_col, amount_col = config.DEALS_DATE_COLUMN, config.DEALS_AMOUNT_COLUMN
     for _, row in df[mask].iterrows():
         d = _parse_date(row.get(date_col))
-        amount = parse_money(row.get(amount_col)) if not isinstance(row.get(amount_col), (int, float)) else row.get(amount_col)
+        raw_amount = row.get(amount_col)
+        amount = raw_amount if isinstance(raw_amount, (int, float)) else parse_money(raw_amount)
         if d is None or amount is None:
             continue
         payments.append({"date": d.isoformat(), "amount": abs(float(amount))})

@@ -282,9 +282,9 @@ def _registry_prefill(prefix):
     if real_estate is None or deals is None:
         st.info("Чтобы подтянуть объект из реестра, нажми «🔄 Обновить данные» в боковой панели.")
         return
-    choices = object_choices(real_estate)
+    choices = object_choices(real_estate, deals)
     if not choices:
-        st.warning("В листе «Real Estate» не найдено объектов.")
+        st.warning("В листах «Real Estate»/«Сделки» не найдено объектов.")
         return
 
     labels = [c["label"] for c in choices]
