@@ -111,12 +111,6 @@ def _refresh():
             "exposure_days": exposure_days,
         }
 
-    # ссылки realt проверяются вживую при разборе (см. market_realt._resolve_link);
-    # если ни один вариант URL не открылся — не показываем мёртвую ссылку в списке,
-    # а сразу отправляем объявление в архив с пометкой «битая ссылка»
-    broken = [l for l in listings if not l.get("link_verified", True)]
-    listings = [l for l in listings if l.get("link_verified", True)]
-
     is_first_run = len(seen) == 0
     for l in listings:
         if l["id"] not in seen:
@@ -125,14 +119,10 @@ def _refresh():
         else:
             l["is_new"] = False
 
-    archive_records = [
-        _archive_entry(l, "Битая ссылка (не открылась)", seen.pop(l["id"], today_iso))
-        for l in broken
-    ]
-
-    # объявления, которые были в прошлой выдаче, но пропали из новой — тоже в архив
-    current_ids = {l["id"] for l in listings} | {l["id"] for l in broken}
+    # объявления, которые были в прошлой выдаче, но пропали из новой — в архив
+    current_ids = {l["id"] for l in listings}
     archived_ids = set(old_by_id) - current_ids
+    archive_records = []
     for aid in archived_ids:
         old = old_by_id[aid]
         first_seen = seen.pop(aid, old.get("listed_at") or today_iso)
@@ -141,12 +131,6 @@ def _refresh():
     if archive_records:
         append_archive(archive_records)
     save_seen(seen)
-
-    if broken:
-        warnings.append(
-            f"{len(broken)} объявление(й) realt.by с битой ссылкой отправлено в архив "
-            f"(не открылась ни одна из проверенных ссылок)."
-        )
 
     cache = save_listings(listings, warnings)
     append_history_snapshot(_summary_rows(pd.DataFrame(listings)))
