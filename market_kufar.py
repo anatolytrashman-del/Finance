@@ -1,10 +1,12 @@
 """Загрузка и разбор объявлений kufar.by по отслеживаемым адресам.
 
 Использует внутренний поисковый API куфара (тот же, что и их сайт).
-Поиск текстом по адресу + строгий фильтр по геотегу дома
-(address_tags_yandex), чтобы отсечь мусорные совпадения и соседние дома.
+Поиск текстом по адресу + фильтр по дому — двумя способами (см. _parse_ad):
+основной, точный — геотег дома (address_tags_yandex); запасной — по обычному
+тексту объявления, для улиц, чью транслитерацию kufar мы не проверяли живьём.
 Цены в price_usd приходят в центах — делим на 100.
 """
+import re
 import time
 
 import requests
@@ -53,10 +55,27 @@ def _first_val(param_entry):
         return None
 
 
-def _parse_ad(ad, house_tag, address_label):
+def _text_match(ad, street, house):
+    """Запасное сопоставление по обычному тексту объявления (заголовок +
+    описание) — на случай, если геотег дома не задан или не совпал (неверная
+    транслитерация непроверенной улицы). Требует, чтобы рядом с названием
+    улицы (в пределах ~25 символов дальше) встретился номер дома отдельным
+    числом — иначе легко словить, например, дом 2 внутри дома 20."""
+    if not street or not house:
+        return False
+    text = f"{ad.get('subject') or ''} {ad.get('body') or ''}".lower()
+    idx = text.find(street.lower())
+    if idx == -1:
+        return False
+    window = text[idx : idx + len(street) + 25]
+    return bool(re.search(rf"(?<!\d){re.escape(str(house))}(?!\d)", window))
+
+
+def _parse_ad(ad, house_tag, address_label, street=None, house=None):
     params = _param_map(ad)
     tags = (params.get("address_tags_yandex") or {}).get("v") or []
-    if not any(house_tag in str(t) for t in tags):
+    tag_match = bool(house_tag) and any(house_tag in str(t) for t in tags)
+    if not tag_match and not _text_match(ad, street, house):
         return None  # объявление не про наш дом
     category = _category_label(ad, params)
     if category is None:
@@ -98,9 +117,10 @@ def _parse_ad(ad, house_tag, address_label):
     }
 
 
-def fetch_address(query, house_tag, address_label):
+def fetch_address(query, house_tag, address_label, street=None, house=None):
     """Собирает все объявления по одному адресу (с пагинацией).
 
+    street/house — для запасного текстового сопоставления, см. _text_match.
     Возвращает (listings, warnings)."""
     listings, warnings = [], []
     seen_ids = set()
@@ -124,7 +144,7 @@ def fetch_address(query, house_tag, address_label):
             if ad_id in seen_ids:
                 continue
             seen_ids.add(ad_id)
-            parsed = _parse_ad(ad, house_tag, address_label)
+            parsed = _parse_ad(ad, house_tag, address_label, street=street, house=house)
             if parsed:
                 listings.append(parsed)
 
@@ -144,7 +164,10 @@ def fetch_all(addresses):
     """Собирает объявления по всем адресам из конфига."""
     all_listings, all_warnings = [], []
     for addr in addresses:
-        listings, warnings = fetch_address(addr["query"], addr["house_tag"], addr["label"])
+        listings, warnings = fetch_address(
+            addr["query"], addr["house_tag"], addr["label"],
+            street=addr.get("realt_street"), house=addr.get("house"),
+        )
         all_listings.extend(listings)
         all_warnings.extend(warnings)
         time.sleep(PAGE_PAUSE_SEC)

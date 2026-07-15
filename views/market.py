@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from config import MONITORED_ADDRESSES
+from config import MONITORED_ADDRESSES, MONITORED_QUARTALS
 from market_kufar import fetch_all as fetch_kufar
 from market_realt import fetch_all as fetch_realt
 from market_realt import verify_links as verify_realt_links
@@ -22,7 +22,7 @@ from market_store import (
 )
 
 st.title("🏷️ Анализ рынка")
-st.caption("Источники: kufar.by, realt.by · " + " · ".join(a["label"] for a in MONITORED_ADDRESSES))
+st.caption("Источники: kufar.by, realt.by · " + " · ".join(q["name"] for q in MONITORED_QUARTALS))
 
 DEAL_ORDER = ["Продажа", "Аренда"]
 CATEGORY_ORDER = ["Квартиры и апартаменты", "Торговые помещения", "Офисы", "Другая коммерческая"]
@@ -204,10 +204,12 @@ if sel_source:
 
 comments = load_comments()
 
-for addr in MONITORED_ADDRESSES:
-    label = addr["label"]
-    sub = df[df["address"] == label]
-    st.header(f"🏠 {label}")
+for quartal in MONITORED_QUARTALS:
+    q_name = quartal["name"]
+    q_labels = [a["label"] for a in quartal["addresses"]]
+    sub = df[df["address"].isin(q_labels)]
+    st.header(f"🏠 {q_name}")
+    st.caption(" · ".join(q_labels))
     if sub.empty:
         st.caption("Объявлений не найдено.")
         continue
@@ -241,7 +243,7 @@ for addr in MONITORED_ADDRESSES:
 
     new_count = int(sub["is_new"].sum())
     badge = f" · 🆕 новых: {new_count}" if new_count else ""
-    with st.expander(f"Все объявления — {label} ({len(sub)}){badge}"):
+    with st.expander(f"Все объявления — {q_name} ({len(sub)}){badge}"):
         table = sub.copy()
         table = table.sort_values(["is_new", "deal", "category", "ppm"], ascending=[False, True, True, True])
         table["Цена"] = table["price_usd"].apply(_fmt_money)
@@ -251,6 +253,7 @@ for addr in MONITORED_ADDRESSES:
         table["Этаж"] = table.apply(_fmt_floor, axis=1)
         table = table.rename(
             columns={
+                "address": "Адрес",
                 "deal": "Сделка",
                 "category": "Категория",
                 "source": "Источник",
@@ -260,11 +263,11 @@ for addr in MONITORED_ADDRESSES:
                 "link": "Ссылка",
             }
         )
-        visible_cols = ["Статус", "Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²",
+        visible_cols = ["Статус", "Адрес", "Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²",
                          "Этаж", "Цена", "Цена метра", "Размещено", "Ссылка", "Комментарий"]
         edited = st.data_editor(
             table[["id", *visible_cols]],
-            key=f"listings_editor_{label}",
+            key=f"listings_editor_{q_name}",
             width="stretch",
             hide_index=True,
             column_order=visible_cols,
