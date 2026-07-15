@@ -519,6 +519,34 @@ def _buyrent_form(prefix, d):
     market_default = st.session_state.get(f"{prefix}_market_prefill", d.get("market_value") or 0)
     market_value = st.number_input("Рыночная стоимость сейчас, $", min_value=0.0, value=float(market_default or 0), step=1000.0, key=f"{prefix}_market")
 
+    st.markdown("**Продажа в будущем (опционально)**")
+    plan_sale = st.checkbox(
+        "Заложить продажу в будущем (сдаю N лет, потом продаю)",
+        value=bool(d.get("plan_sale")), key=f"{prefix}_plansale",
+    )
+    sale_fields = {"plan_sale": plan_sale}
+    if plan_sale:
+        st.caption("Аренда копится до даты продажи, а выход считается по планируемой цене (за вычетом налога).")
+        s1, s2 = st.columns(2)
+        sale_default = float(d.get("sell_price") or market_value or 0)
+        sell_price = s1.number_input("Планируемая цена продажи, $", min_value=0.0, value=sale_default, step=1000.0, key=f"{prefix}_sellprice")
+        sell_date = s2.date_input(
+            "Планируемая дата продажи",
+            value=_date_or(d, "sell_date", date.today().replace(year=date.today().year + 3)),
+            format="DD.MM.YYYY", key=f"{prefix}_selldate",
+        )
+        t1, t2 = st.columns([1, 2])
+        tax_pct = t1.number_input("Налог с продажи, %", min_value=0.0, max_value=100.0, value=float(d.get("tax_pct", 0)), step=1.0, key=f"{prefix}_taxpct")
+        tax_base = t2.radio(
+            "Считать налог", SALE_TAX_BASES, horizontal=True,
+            index=SALE_TAX_BASES.index(d.get("tax_base")) if d.get("tax_base") in SALE_TAX_BASES else 0,
+            key=f"{prefix}_taxbase",
+        )
+        sale_fields.update({
+            "sell_price": sell_price, "sell_date": sell_date.isoformat(),
+            "tax_pct": tax_pct, "tax_base": tax_base,
+        })
+
     return {
         "payments": payments,
         "reno": reno,
@@ -526,13 +554,15 @@ def _buyrent_form(prefix, d):
         "rent_month": rent_month,
         "rent_start": rent_start.isoformat(),
         "market_value": market_value,
+        **sale_fields,
     }
 
 
 def _buyrent_metrics(m):
     r = compute_buyrent(m)
     row1 = st.columns(3)
-    row1[0].metric("📈 Прирост стоимости", _fmt_profit(r["appreciation"]))
+    growth_label = "📈 Прирост при продаже" if r["planning"] else "📈 Прирост стоимости"
+    row1[0].metric(growth_label, _fmt_profit(r["appreciation"]))
     row1[1].metric("🏠 Прибыль от аренды в год", _fmt_profit(r["annual_rent"]))
     row1[2].metric("📊 Доходность от роста", _pct(r["appr_return"]))
     row2 = st.columns(3)
@@ -541,10 +571,21 @@ def _buyrent_metrics(m):
     row2[2].metric("📅 Годовая (XIRR)", _pct(r["annual"]))
 
     period = f"{r['years']:.1f} лет" if r["years"] else "—"
-    recap = (
+    invested_line = (
         f"Вложено {_fmt_profit(r['invested'])} (покупка {_fmt_profit(r['invested_payments'])}"
-        f" + ремонт {_fmt_profit(r['reno'])}) · рыночная {_fmt_profit(r['market'])} · "
-        f"в аренде {r['months_rented']:.0f} мес → аренды получено {_fmt_profit(r['cumulative_rent'])} · "
+        f" + ремонт {_fmt_profit(r['reno'])})"
+    )
+    if r["planning"]:
+        exit_line = (
+            f"продажа {_fmt_profit(r['sell_price'])} "
+            f"({r['sell_date'].strftime('%m.%Y') if r['sell_date'] else '—'}), "
+            f"налог {_fmt_profit(r['tax'])} → на руки {_fmt_profit(r['proceeds'])}"
+        )
+    else:
+        exit_line = f"рыночная {_fmt_profit(r['market'])} (оценка сегодня)"
+    recap = (
+        f"{invested_line} · {exit_line} · "
+        f"в аренде {r['months_rented']:.0f} мес → аренды {_fmt_profit(r['cumulative_rent'])} · "
         f"срок проекта {period}"
     )
     st.caption(recap.replace("$", r"\$"))
