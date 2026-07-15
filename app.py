@@ -8,9 +8,10 @@ dashboard = st.Page("views/dashboard.py", title="Дашборды", icon="📊",
 balance = st.Page("views/balance.py", title="Баланс", icon="⚖️")
 deals = st.Page("views/deals.py", title="Сделки", icon="📈")
 real_estate = st.Page("views/real_estate.py", title="Недвижимость", icon="🏠")
+documents = st.Page("views/documents.py", title="Архив документов", icon="🗂️")
 ideas = st.Page("views/ideas.py", title="Инвест-идеи", icon="💡")
 finmodel = st.Page("views/finmodel.py", title="Финмодель", icon="🧮")
 market = st.Page("views/market.py", title="Рынок", icon="🏷️")
 
-nav = st.navigation([dashboard, balance, deals, real_estate, ideas, finmodel, market])
+nav = st.navigation([dashboard, balance, deals, real_estate, documents, ideas, finmodel, market])
 nav.run()
