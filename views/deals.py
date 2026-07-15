@@ -1,5 +1,4 @@
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 from data_source import load_deals, sidebar_refresh_control
@@ -19,68 +18,63 @@ if df.empty:
 
 DEAL_TYPE_COL = "Тип сделки"
 PROFIT_COL = "Чистая прибыль по сделке"
+ASSET_COL = "Вид актива"
 
-if DEAL_TYPE_COL in df.columns and "Дата" in df.columns and "Сумма" in df.columns:
-    purchases = df[df[DEAL_TYPE_COL] == "Покупка"]
-    if not purchases.empty:
-        yearly = (
-            purchases.assign(Год=purchases["Дата"].dt.year)
-            .groupby("Год", as_index=False)["Сумма"]
-            .sum()
-        )
-        st.subheader("Инвестировано по годам, $")
-        fig = px.bar(yearly, x="Год", y="Сумма")
-        fig.update_traces(marker_color="#2E7D32")
-        fig.update_xaxes(type="category")
-        fig.update_layout(
-            xaxis_title=None,
-            yaxis_title="USD",
-            margin=dict(l=10, r=10, t=10, b=10),
-            height=320,
-        )
-        st.plotly_chart(fig, use_container_width=True)
+# Категории (сущности): Инвестиции (отток), Продажа, Дивиденды (притоки-возвраты)
+INVEST, SALE, DIVIDEND, OTHER = "Инвестиции", "Продажа", "Дивиденды", "Прочее"
+ENTITY_ORDER = [INVEST, SALE, DIVIDEND, OTHER]
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    asset_types = sorted(df["Вид актива"].dropna().unique()) if "Вид актива" in df.columns else []
-    selected_types = st.multiselect("Вид актива", asset_types, default=asset_types)
-with col2:
-    if DEAL_TYPE_COL in df.columns:
-        deal_types = sorted(df[DEAL_TYPE_COL].dropna().unique())
-        selected_deal_types = st.multiselect(DEAL_TYPE_COL, deal_types, default=deal_types)
-    else:
-        selected_deal_types = []
-with col3:
-    if "Дата" in df.columns:
-        min_date, max_date = df["Дата"].min(), df["Дата"].max()
-        date_range = st.date_input(
-            "Период", value=(min_date, max_date), min_value=min_date, max_value=max_date
-        )
-    else:
-        date_range = None
-
-filtered = df.copy()
-if selected_types:
-    filtered = filtered[filtered["Вид актива"].isin(selected_types)]
-if DEAL_TYPE_COL in filtered.columns and selected_deal_types:
-    filtered = filtered[filtered[DEAL_TYPE_COL].isin(selected_deal_types)]
-if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
-    start, end = date_range
-    filtered = filtered[
-        (filtered["Дата"].dt.date >= start) & (filtered["Дата"].dt.date <= end)
-    ]
-
-st.caption(f"Найдено сделок: {len(filtered)}")
+RENT_MONTHLY = 375.0
+RENT_START = pd.Timestamp(2025, 2, 1)
+RENT_LABEL = "Аренда квартиры"
 
 
-def _signed_amount(row):
-    """Покупки — со знаком минус (отток), продажи и займы — с плюсом (приток)."""
-    amt = row.get("Сумма")
-    if pd.isna(amt):
-        return amt
-    if DEAL_TYPE_COL in row and row[DEAL_TYPE_COL] == "Покупка":
-        return -abs(amt)
-    return abs(amt)
+def _entity(deal_type):
+    t = str(deal_type or "").lower()
+    if "возврат" in t or "аренда" in t or "дивиденд" in t:
+        return DIVIDEND
+    if t == "покупка" or "выдача займа" in t:
+        return INVEST
+    if "продажа" in t:
+        return SALE
+    return OTHER
+
+
+def _generate_rent_rows(columns):
+    """Аренда квартиры: $375 первого числа каждого месяца с фев-2025 по текущий.
+    Генерится на стороне приложения (в таблицу не вносится), обновляется сама."""
+    if "Дата" not in columns or "Сумма" not in columns:
+        return pd.DataFrame(columns=columns)
+    today = pd.Timestamp.today().normalize()
+    dates = pd.date_range(start=RENT_START, end=today, freq="MS")
+    rows = []
+    for d in dates:
+        row = {c: None for c in columns}
+        row["Дата"] = d
+        row["Сумма"] = RENT_MONTHLY
+        if DEAL_TYPE_COL in row:
+            row[DEAL_TYPE_COL] = RENT_LABEL
+        if ASSET_COL in row:
+            row[ASSET_COL] = "Недвижимость"
+        if PROFIT_COL in row:
+            row[PROFIT_COL] = RENT_MONTHLY
+        if "Объект" in row:
+            row["Объект"] = "Квартира (аренда)"
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+# --- добавляем сгенерированную аренду и категорию ---
+if "Дата" in df.columns:
+    rent = _generate_rent_rows(list(df.columns))
+    if not rent.empty:
+        df = pd.concat([df, rent], ignore_index=True)
+    df = df.sort_values("Дата", ascending=False).reset_index(drop=True)
+df["Категория"] = df[DEAL_TYPE_COL].apply(_entity) if DEAL_TYPE_COL in df.columns else OTHER
+
+
+def _fmt_pos(v):
+    return f"${v:,.0f}".replace(",", " ")
 
 
 def _fmt_signed(v):
@@ -90,35 +84,105 @@ def _fmt_signed(v):
     return f"{sign}${abs(v):,.0f}".replace(",", " ")
 
 
+def _signed_amount(row):
+    """Инвестиции — минус (отток), продажи и дивиденды — плюс (приток)."""
+    amt = row.get("Сумма")
+    if pd.isna(amt):
+        return amt
+    return -abs(amt) if row.get("Категория") == INVEST else abs(amt)
+
+
+# ============================ Период ============================
+years = sorted(df["Дата"].dt.year.dropna().unique().astype(int)) if "Дата" in df.columns else []
+period_options = ["Все время"] + [str(y) for y in years]
+if st.session_state.get("deals_period") not in period_options:
+    st.session_state["deals_period"] = "Все время"
+
+st.caption("Период")
+pcols = st.columns(len(period_options))
+for i, opt in enumerate(period_options):
+    is_sel = st.session_state["deals_period"] == opt
+    if pcols[i].button(opt, key=f"deals_period_{opt}", width="stretch",
+                       type="primary" if is_sel else "secondary"):
+        st.session_state["deals_period"] = opt
+        st.rerun()
+period = st.session_state["deals_period"]
+
+# ============================ Фильтры ============================
+fc1, fc2 = st.columns(2)
+with fc1:
+    asset_types = sorted(df[ASSET_COL].dropna().unique()) if ASSET_COL in df.columns else []
+    selected_types = st.multiselect(ASSET_COL, asset_types, default=asset_types)
+with fc2:
+    cats_present = [c for c in ENTITY_ORDER if c in set(df["Категория"])]
+    selected_cats = st.multiselect("Категория", cats_present, default=cats_present)
+
+filtered = df.copy()
+if selected_types and ASSET_COL in filtered.columns:
+    filtered = filtered[filtered[ASSET_COL].isin(selected_types)]
+if selected_cats:
+    filtered = filtered[filtered["Категория"].isin(selected_cats)]
+if period != "Все время" and "Дата" in filtered.columns:
+    filtered = filtered[filtered["Дата"].dt.year == int(period)]
+
+st.caption(f"Найдено сделок: {len(filtered)}")
+
+# ============================ Метрики ============================
+def _cat_sum(cat):
+    return filtered.loc[filtered["Категория"] == cat, "Сумма"].abs().sum() if "Сумма" in filtered.columns else 0
+
+
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("📉 Инвестировано", _fmt_pos(_cat_sum(INVEST)))
+m2.metric("💰 Продажи", _fmt_pos(_cat_sum(SALE)))
+m3.metric("💵 Дивиденды", _fmt_pos(_cat_sum(DIVIDEND)))
+profit_total = filtered[PROFIT_COL].sum() if PROFIT_COL in filtered.columns else 0
+m4.metric("🧮 Чистая прибыль по сделкам", _fmt_signed(profit_total))
+
+# ============================ Таблица ============================
 display = filtered.copy()
 if "Дата" in display.columns:
     display["Дата"] = display["Дата"].dt.strftime("%d.%m.%Y")
 if "Сумма" in filtered.columns:
-    signed = filtered.apply(_signed_amount, axis=1) if len(filtered) else filtered["Сумма"]
-    display["Сумма"] = signed.apply(_fmt_signed)
-# "Чистая прибыль по сделке" — технический столбец (только для счётчика), в таблице не показываем
+    display["Сумма"] = filtered.apply(_signed_amount, axis=1).apply(_fmt_signed) if len(filtered) else filtered["Сумма"]
 if PROFIT_COL in display.columns:
     display = display.drop(columns=[PROFIT_COL])
+# «Категория» — вперёд, сразу после «Тип сделки»
+cols = list(display.columns)
+if "Категория" in cols:
+    cols.remove("Категория")
+    insert_at = cols.index(DEAL_TYPE_COL) + 1 if DEAL_TYPE_COL in cols else 0
+    cols.insert(insert_at, "Категория")
+    display = display[cols]
 
 st.dataframe(display, width="stretch", hide_index=True)
 
-
-def _fmt_pos(v):
-    return f"${v:,.0f}".replace(",", " ")
-
-
-def _sum_by_type(deal_type):
-    if DEAL_TYPE_COL in filtered.columns and "Сумма" in filtered.columns:
-        return filtered.loc[filtered[DEAL_TYPE_COL] == deal_type, "Сумма"].sum()
-    return 0
+# ============================ По годам ============================
+st.divider()
+st.subheader("По годам")
 
 
-if DEAL_TYPE_COL in filtered.columns and "Сумма" in filtered.columns:
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Итого проинвестировано", _fmt_pos(_sum_by_type("Покупка")))
-    m2.metric("Итого продано", _fmt_pos(_sum_by_type("Продажа")))
-    m3.metric("Итого выдано в займ", _fmt_pos(_sum_by_type("Выдача займа")))
-    profit_total = filtered[PROFIT_COL].sum() if PROFIT_COL in filtered.columns else 0
-    m4.metric("Чистая прибыль по сделкам", _fmt_signed(profit_total))
-elif "Сумма" in filtered.columns:
-    st.metric("Сумма по фильтру", _fmt_pos(filtered["Сумма"].sum()))
+def _yearly_table(entity):
+    """Годовая сводка по категории (все годы, с учётом фильтра «Вид актива»)."""
+    src = df[df["Категория"] == entity]
+    if selected_types and ASSET_COL in src.columns:
+        src = src[src[ASSET_COL].isin(selected_types)]
+    if src.empty or "Дата" not in src.columns:
+        return pd.DataFrame({"Год": [], "Сумма": []})
+    g = (src.assign(Год=src["Дата"].dt.year)
+         .groupby("Год", as_index=False)["Сумма"].sum())
+    g["Сумма"] = g["Сумма"].abs()
+    total = g["Сумма"].sum()
+    g["Год"] = g["Год"].astype(int).astype(str)
+    g["Сумма"] = g["Сумма"].apply(_fmt_pos)
+    g = pd.concat([g, pd.DataFrame([{"Год": "Итого", "Сумма": _fmt_pos(total)}])], ignore_index=True)
+    return g
+
+
+yc1, yc2 = st.columns(2)
+with yc1:
+    st.markdown("**📉 Инвестировано по годам**")
+    st.dataframe(_yearly_table(INVEST), width="stretch", hide_index=True)
+with yc2:
+    st.markdown("**💵 Дивиденды по годам**")
+    st.dataframe(_yearly_table(DIVIDEND), width="stretch", hide_index=True)
