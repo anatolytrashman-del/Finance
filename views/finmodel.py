@@ -28,6 +28,7 @@ st.title("🧮 Финмодель")
 st.header("🏠 Аренда")
 
 TAX_MODES = ["% от аренды", "Фикс. сумма в месяц"]
+CURRENCIES = ["$", "₽"]
 
 if "finmodels" not in st.session_state:
     st.session_state["finmodels"] = load_finmodels()
@@ -35,8 +36,18 @@ if "finmodels" not in st.session_state:
 models = st.session_state["finmodels"]
 
 
-def _fmt_money(v):
-    return f"${v:,.0f}".replace(",", " ")
+def _currency_select(d, key=None):
+    return st.selectbox(
+        "Валюта проекта", CURRENCIES,
+        index=CURRENCIES.index(d.get("currency")) if d.get("currency") in CURRENCIES else 0,
+        key=key,
+    )
+
+
+def _fmt_money(v, currency="$"):
+    if currency == "$":
+        return f"${v:,.0f}".replace(",", " ")
+    return f"{v:,.0f} {currency}".replace(",", " ")
 
 
 def compute(m):
@@ -70,13 +81,15 @@ def compute(m):
 
 
 def _render_fields(d):
+    currency = _currency_select(d)
+
     st.markdown("**Капитальные расходы**")
     c1, c2 = st.columns(2)
-    purchase = c1.number_input("Цена покупки, $", min_value=0.0, value=float(d.get("purchase", 0)), step=1000.0)
-    reno = c2.number_input("Цена ремонта, $", min_value=0.0, value=float(d.get("reno", 0)), step=1000.0)
+    purchase = c1.number_input("Цена покупки", min_value=0.0, value=float(d.get("purchase", 0)), step=1000.0)
+    reno = c2.number_input("Цена ремонта", min_value=0.0, value=float(d.get("reno", 0)), step=1000.0)
 
     st.markdown("**Доход**")
-    rent = st.number_input("Цена аренды в месяц, $", min_value=0.0, value=float(d.get("rent", 0)), step=100.0)
+    rent = st.number_input("Цена аренды в месяц", min_value=0.0, value=float(d.get("rent", 0)), step=100.0)
 
     st.markdown("**Регулярные расходы**")
     tax_mode = st.radio(
@@ -86,16 +99,17 @@ def _render_fields(d):
         index=TAX_MODES.index(d.get("tax_mode")) if d.get("tax_mode") in TAX_MODES else 0,
     )
     tax_value = st.number_input(
-        "Значение налога (% от аренды или сумма $ в месяц — по выбору выше)",
+        "Значение налога (% от аренды или фикс. сумма в месяц — по выбору выше)",
         min_value=0.0,
         value=float(d.get("tax_value", 0)),
         step=10.0,
     )
     c3, c4 = st.columns(2)
-    fees_year = c3.number_input("Фиксированные сборы в год, $", min_value=0.0, value=float(d.get("fees_year", 0)), step=100.0)
-    insurance_month = c4.number_input("Страховка в месяц, $", min_value=0.0, value=float(d.get("insurance_month", 0)), step=10.0)
+    fees_year = c3.number_input("Фиксированные сборы в год", min_value=0.0, value=float(d.get("fees_year", 0)), step=100.0)
+    insurance_month = c4.number_input("Страховка в месяц", min_value=0.0, value=float(d.get("insurance_month", 0)), step=10.0)
 
     return {
+        "currency": currency,
         "purchase": purchase,
         "reno": reno,
         "rent": rent,
@@ -107,6 +121,7 @@ def _render_fields(d):
 
 
 def _metrics_and_recap(m):
+    currency = m.get("currency", "$")
     r = compute(m)
     cols = st.columns(4)
     cols[0].metric("Чистая доходность", f"{r['yield_pct']:.1f}%" if r["yield_pct"] is not None else "—")
@@ -117,21 +132,21 @@ def _metrics_and_recap(m):
     else:
         payback_str = "—"
     cols[1].metric("Срок окупаемости", payback_str)
-    cols[2].metric("Чистый доход / год", _fmt_money(r["net_year"]))
-    cols[3].metric("Чистый доход / мес", _fmt_money(r["net_month"]))
+    cols[2].metric("Чистый доход / год", _fmt_money(r["net_year"], currency))
+    cols[3].metric("Чистый доход / мес", _fmt_money(r["net_month"], currency))
 
     if m.get("tax_mode") == TAX_MODES[0]:
         tax_str = f"{m.get('tax_value', 0):g}% от аренды"
     else:
-        tax_str = f"{_fmt_money(m.get('tax_value', 0))}/мес"
+        tax_str = f"{_fmt_money(m.get('tax_value', 0), currency)}/мес"
     recap = (
-        f"Вложения: {_fmt_money(r['investment'])} "
-        f"(покупка {_fmt_money(m.get('purchase', 0))} + ремонт {_fmt_money(m.get('reno', 0))}) · "
-        f"Аренда: {_fmt_money(m.get('rent', 0))}/мес · "
-        f"Грязный доход: {_fmt_money(r['gross_year'])}/год · "
-        f"Расходы: {_fmt_money(r['expenses_year'])}/год "
-        f"(налог {tax_str}, сборы {_fmt_money(m.get('fees_year', 0))}/год, "
-        f"страховка {_fmt_money(m.get('insurance_month', 0))}/мес)"
+        f"Вложения: {_fmt_money(r['investment'], currency)} "
+        f"(покупка {_fmt_money(m.get('purchase', 0), currency)} + ремонт {_fmt_money(m.get('reno', 0), currency)}) · "
+        f"Аренда: {_fmt_money(m.get('rent', 0), currency)}/мес · "
+        f"Грязный доход: {_fmt_money(r['gross_year'], currency)}/год · "
+        f"Расходы: {_fmt_money(r['expenses_year'], currency)}/год "
+        f"(налог {tax_str}, сборы {_fmt_money(m.get('fees_year', 0), currency)}/год, "
+        f"страховка {_fmt_money(m.get('insurance_month', 0), currency)}/мес)"
     )
     # Экранируем $, иначе Streamlit трактует пары $...$ как формулу
     st.caption(recap.replace("$", r"\$"))
@@ -178,7 +193,7 @@ else:
             else:
                 head, edit_btn, del_btn = st.columns([8, 1, 1])
                 safe_name = str(m.get("name", "Проект")).replace("$", r"\$")
-                head.markdown(f"### {safe_name}")
+                head.markdown(f"### {safe_name} ({m.get('currency', '$')})")
                 if edit_btn.button("✏️", key=f"fm_edit_{m['id']}", help="Редактировать проект"):
                     st.session_state["fm_editing_id"] = m["id"]
                     st.rerun()
@@ -203,12 +218,14 @@ if "sale_finmodels" not in st.session_state:
 sale_models = st.session_state["sale_finmodels"]
 
 
-def _fmt_profit(v):
-    """Деньги со знаком: убыток показываем как -$5 000."""
+def _fmt_profit(v, currency="$"):
+    """Деньги со знаком: убыток показываем как -$5 000 / -5 000 ₽."""
     if v is None:
         return "—"
     sign = "-" if v < 0 else ""
-    return f"{sign}${abs(v):,.0f}".replace(",", " ")
+    if currency == "$":
+        return f"{sign}${abs(v):,.0f}".replace(",", " ")
+    return f"{sign}{abs(v):,.0f} {currency}".replace(",", " ")
 
 
 def _payments_to_df(payments):
@@ -218,16 +235,16 @@ def _payments_to_df(payments):
             d = pd.to_datetime(p.get("date")).date()
         except Exception:  # noqa: BLE001
             d = None
-        rows.append({"Дата платежа": d, "Сумма, $": float(p.get("amount") or 0)})
+        rows.append({"Дата платежа": d, "Сумма": float(p.get("amount") or 0)})
     if not rows:
-        rows = [{"Дата платежа": date.today().replace(day=1), "Сумма, $": 0.0}]
+        rows = [{"Дата платежа": date.today().replace(day=1), "Сумма": 0.0}]
     return pd.DataFrame(rows)
 
 
 def _df_to_payments(df):
     payments = []
     for _, row in df.iterrows():
-        d, amount = row.get("Дата платежа"), row.get("Сумма, $")
+        d, amount = row.get("Дата платежа"), row.get("Сумма")
         if pd.isna(d) or pd.isna(amount) or float(amount) <= 0:
             continue
         payments.append({"date": pd.to_datetime(d).date().isoformat(), "amount": float(amount)})
@@ -245,7 +262,7 @@ def _schedule_editor(prefix, payments):
         hide_index=True,
         column_config={
             "Дата платежа": st.column_config.DateColumn("Дата платежа", format="DD.MM.YYYY"),
-            "Сумма, $": st.column_config.NumberColumn("Сумма, $", min_value=0.0, step=1000.0, format="%.0f"),
+            "Сумма": st.column_config.NumberColumn("Сумма", min_value=0.0, step=1000.0, format="%.0f"),
         },
     )
     return _df_to_payments(edited)
@@ -255,7 +272,7 @@ def _sale_sell_tax_fields(prefix, d):
     st.markdown("**Продажа**")
     c1, c2 = st.columns(2)
     sell_price = c1.number_input(
-        "Цена продажи, $", min_value=0.0, value=float(d.get("sell_price", 0)), step=1000.0, key=f"{prefix}_sell",
+        "Цена продажи", min_value=0.0, value=float(d.get("sell_price", 0)), step=1000.0, key=f"{prefix}_sell",
     )
     default_sell_date = date.today()
     if d.get("sell_date"):
@@ -343,9 +360,10 @@ def _registry_prefill(prefix):
 
 
 def _sale_metrics_and_recap(m):
+    currency = m.get("currency", "$")
     r = compute_sale(m)
     cols = st.columns(3)
-    cols[0].metric("Чистая прибыль", _fmt_profit(r["net"]))
+    cols[0].metric("Чистая прибыль", _fmt_profit(r["net"], currency))
     cols[1].metric("Доходность за всё время", f"{r['total_return']:.1f}%" if r["total_return"] is not None else "—")
     cols[2].metric("Доходность в год (XIRR)", f"{r['annual']:.1f}%" if r["annual"] is not None else "—")
 
@@ -353,17 +371,21 @@ def _sale_metrics_and_recap(m):
     n_pay = len(m.get("payments") or [])
     tax_str = f"{m.get('tax_pct', 0):g}% ({str(m.get('tax_base', SALE_TAX_BASES[0])).lower()})"
     recap = (
-        f"Вложено {_fmt_profit(r['total_invested'])} за {n_pay} платеж(ей) · "
-        f"продажа {_fmt_profit(r['sell'])} · срок {period} · "
-        f"налог {tax_str} = {_fmt_profit(r['tax'])} · на руки {_fmt_profit(r['proceeds'])}"
+        f"Вложено {_fmt_profit(r['total_invested'], currency)} за {n_pay} платеж(ей) · "
+        f"продажа {_fmt_profit(r['sell'], currency)} · срок {period} · "
+        f"налог {tax_str} = {_fmt_profit(r['tax'], currency)} · на руки {_fmt_profit(r['proceeds'], currency)}"
     )
     st.caption(recap.replace("$", r"\$"))
 
 
 def _sale_form(prefix, d):
     """Полный ввод проекта продажи. Возвращает dict полей (без name/id)."""
+    currency = _currency_select(d, key=f"{prefix}_currency")
+
     use_registry = st.checkbox("🏠 Мой объект — подтянуть график из реестра", key=f"{prefix}_useobj")
     if use_registry:
+        if currency != "$":
+            st.caption("⚠️ Данные из реестра («Сделки»/«Real Estate») в долларах — при подтягивании выбери валюту $.")
         _registry_prefill(prefix)
 
     st.markdown("**График платежей (вложения)**")
@@ -372,7 +394,7 @@ def _sale_form(prefix, d):
     payments = _schedule_editor(prefix, payments)
 
     sell_tax = _sale_sell_tax_fields(prefix, d)
-    return {"payments": payments, **sell_tax}
+    return {"payments": payments, "currency": currency, **sell_tax}
 
 
 # --- Добавление проекта продажи ---
@@ -419,7 +441,7 @@ else:
             else:
                 head, edit_btn, del_btn = st.columns([8, 1, 1])
                 safe_name = str(m.get("name", "Проект")).replace("$", r"\$")
-                head.markdown(f"### {safe_name}")
+                head.markdown(f"### {safe_name} ({m.get('currency', '$')})")
                 if edit_btn.button("✏️", key=f"sale_fm_edit_{m['id']}", help="Редактировать проект"):
                     st.session_state["sale_fm_editing_id"] = m["id"]
                     st.rerun()
@@ -496,8 +518,12 @@ def _buyrent_registry_prefill(prefix):
 
 def _buyrent_form(prefix, d):
     """Полный ввод проекта «покупка + аренда». Возвращает dict полей."""
+    currency = _currency_select(d, key=f"{prefix}_currency")
+
     use_registry = st.checkbox("🏠 Мой объект — подтянуть из реестра", key=f"{prefix}_useobj")
     if use_registry:
+        if currency != "$":
+            st.caption("⚠️ Данные из реестра («Сделки»/«Real Estate») в долларах — при подтягивании выбери валюту $.")
         _buyrent_registry_prefill(prefix)
 
     st.markdown("**Платежи за покупку (вложения)**")
@@ -507,17 +533,17 @@ def _buyrent_form(prefix, d):
 
     st.markdown("**Ремонт**")
     r1, r2 = st.columns(2)
-    reno = r1.number_input("Стоимость ремонта, $", min_value=0.0, value=float(d.get("reno", 0)), step=1000.0, key=f"{prefix}_reno")
+    reno = r1.number_input("Стоимость ремонта", min_value=0.0, value=float(d.get("reno", 0)), step=1000.0, key=f"{prefix}_reno")
     reno_date = r2.date_input("Дата ремонта", value=_date_or(d, "reno_date", date.today()), format="DD.MM.YYYY", key=f"{prefix}_renodate")
 
     st.markdown("**Аренда**")
     a1, a2 = st.columns(2)
-    rent_month = a1.number_input("Чистая аренда, $/мес", min_value=0.0, value=float(d.get("rent_month", 0)), step=50.0, key=f"{prefix}_rent")
+    rent_month = a1.number_input("Чистая аренда в месяц", min_value=0.0, value=float(d.get("rent_month", 0)), step=50.0, key=f"{prefix}_rent")
     rent_start = a2.date_input("Дата сдачи в аренду", value=_date_or(d, "rent_start", date.today()), format="DD.MM.YYYY", key=f"{prefix}_rentstart")
 
     st.markdown("**Текущая рыночная стоимость**")
     market_default = st.session_state.get(f"{prefix}_market_prefill", d.get("market_value") or 0)
-    market_value = st.number_input("Рыночная стоимость сейчас, $", min_value=0.0, value=float(market_default or 0), step=1000.0, key=f"{prefix}_market")
+    market_value = st.number_input("Рыночная стоимость сейчас", min_value=0.0, value=float(market_default or 0), step=1000.0, key=f"{prefix}_market")
 
     st.markdown("**Продажа в будущем (опционально)**")
     plan_sale = st.checkbox(
@@ -529,7 +555,7 @@ def _buyrent_form(prefix, d):
         st.caption("Аренда копится до даты продажи, а выход считается по планируемой цене (за вычетом налога).")
         s1, s2 = st.columns(2)
         sale_default = float(d.get("sell_price") or market_value or 0)
-        sell_price = s1.number_input("Планируемая цена продажи, $", min_value=0.0, value=sale_default, step=1000.0, key=f"{prefix}_sellprice")
+        sell_price = s1.number_input("Планируемая цена продажи", min_value=0.0, value=sale_default, step=1000.0, key=f"{prefix}_sellprice")
         sell_date = s2.date_input(
             "Планируемая дата продажи",
             value=_date_or(d, "sell_date", date.today().replace(year=date.today().year + 3)),
@@ -548,6 +574,7 @@ def _buyrent_form(prefix, d):
         })
 
     return {
+        "currency": currency,
         "payments": payments,
         "reno": reno,
         "reno_date": reno_date.isoformat(),
@@ -559,11 +586,12 @@ def _buyrent_form(prefix, d):
 
 
 def _buyrent_metrics(m):
+    currency = m.get("currency", "$")
     r = compute_buyrent(m)
     row1 = st.columns(3)
     growth_label = "📈 Прирост при продаже" if r["planning"] else "📈 Прирост стоимости"
-    row1[0].metric(growth_label, _fmt_profit(r["appreciation"]))
-    row1[1].metric("🏠 Прибыль от аренды в год", _fmt_profit(r["annual_rent"]))
+    row1[0].metric(growth_label, _fmt_profit(r["appreciation"], currency))
+    row1[1].metric("🏠 Прибыль от аренды в год", _fmt_profit(r["annual_rent"], currency))
     row1[2].metric("📊 Доходность от роста", _pct(r["appr_return"]))
     row2 = st.columns(3)
     row2[0].metric("💵 Аренда суммарно (доходность)", _pct(r["rent_yield_cum"]))
@@ -572,20 +600,20 @@ def _buyrent_metrics(m):
 
     period = f"{r['years']:.1f} лет" if r["years"] else "—"
     invested_line = (
-        f"Вложено {_fmt_profit(r['invested'])} (покупка {_fmt_profit(r['invested_payments'])}"
-        f" + ремонт {_fmt_profit(r['reno'])})"
+        f"Вложено {_fmt_profit(r['invested'], currency)} (покупка {_fmt_profit(r['invested_payments'], currency)}"
+        f" + ремонт {_fmt_profit(r['reno'], currency)})"
     )
     if r["planning"]:
         exit_line = (
-            f"продажа {_fmt_profit(r['sell_price'])} "
+            f"продажа {_fmt_profit(r['sell_price'], currency)} "
             f"({r['sell_date'].strftime('%m.%Y') if r['sell_date'] else '—'}), "
-            f"налог {_fmt_profit(r['tax'])} → на руки {_fmt_profit(r['proceeds'])}"
+            f"налог {_fmt_profit(r['tax'], currency)} → на руки {_fmt_profit(r['proceeds'], currency)}"
         )
     else:
-        exit_line = f"рыночная {_fmt_profit(r['market'])} (оценка сегодня)"
+        exit_line = f"рыночная {_fmt_profit(r['market'], currency)} (оценка сегодня)"
     recap = (
         f"{invested_line} · {exit_line} · "
-        f"в аренде {r['months_rented']:.0f} мес → аренды {_fmt_profit(r['cumulative_rent'])} · "
+        f"в аренде {r['months_rented']:.0f} мес → аренды {_fmt_profit(r['cumulative_rent'], currency)} · "
         f"срок проекта {period}"
     )
     st.caption(recap.replace("$", r"\$"))
@@ -637,7 +665,7 @@ else:
             else:
                 head, edit_btn, del_btn = st.columns([8, 1, 1])
                 safe_name = str(m.get("name", "Проект")).replace("$", r"\$")
-                head.markdown(f"### {safe_name}")
+                head.markdown(f"### {safe_name} ({m.get('currency', '$')})")
                 if edit_btn.button("✏️", key=f"buyrent_fm_edit_{m['id']}", help="Редактировать проект"):
                     st.session_state["buyrent_fm_editing_id"] = m["id"]
                     st.rerun()
