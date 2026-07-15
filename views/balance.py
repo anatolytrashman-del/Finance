@@ -1,5 +1,4 @@
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 from data_source import load_balance, sidebar_refresh_control
@@ -33,27 +32,30 @@ def _subtotal(items):
     return sum((it["usd"] or 0) for it in items)
 
 
-def _block_table(items, frozen=False):
-    """Таблица блока: Актив · В $ · Оригинал."""
-    if not items:
+def _cat_table(rows, frozen=False):
+    """rows: список (категория, item). Компактная таблица с колонкой «Категория»."""
+    if not rows:
         st.caption("Нет строк.")
         return
     table = pd.DataFrame(
         [
             {
+                "Категория": cat,
                 "Актив": ("🔒 " + it["name"]) if frozen else it["name"],
                 "В $": _fmt_usd(it["usd"]),
                 "Оригинал": _fmt_orig(it["orig"], it["currency"]),
             }
-            for it in items
+            for cat, it in rows
         ]
     )
     st.dataframe(table, width="stretch", hide_index=True)
 
 
-def _subheader(title, items):
-    st.markdown(f"**{title}** · {_fmt_usd(_subtotal(items))}")
-    _block_table(items)
+def _block(title, icon, rows, frozen=False):
+    total = sum((it["usd"] or 0) for _, it in rows)
+    st.markdown(f"#### {icon} {title} · {_fmt_usd(total)}")
+    _cat_table(rows, frozen=frozen)
+    return total
 
 
 # ---------------- Верхняя сводка ----------------
@@ -67,7 +69,7 @@ m1.metric("💼 Итого капитал", _fmt_usd(balance["grand_total"]))
 m2.metric("🧾 Обязательства", _fmt_usd(obligations_total))
 m3.metric("🔒 Заморожено (вне учёта)", _fmt_usd(frozen_total))
 
-# ---------------- Диаграмма состава активов ----------------
+# ---------------- Состав капитала: компактный бар с процентами ----------------
 composition = {
     "Текущие счета": _subtotal(balance["bank"] + balance["cash"] + balance["crypto"]),
     "Возвраты": _subtotal(balance["returns"]),
@@ -77,43 +79,64 @@ composition = {
     "Бизнес": _subtotal(balance["business"]),
 }
 composition = {k: v for k, v in composition.items() if v > 0}
+comp_total = sum(composition.values())
 if composition:
-    comp_df = pd.DataFrame({"Блок": list(composition), "Сумма": list(composition.values())})
-    fig = px.pie(comp_df, names="Блок", values="Сумма", hole=0.55)
-    fig.update_traces(textposition="inside", texttemplate="%{label}<br>%{percent}")
-    fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=380, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    comp_df = pd.DataFrame(
+        [
+            {"Блок": k, "Сумма": _fmt_usd(v), "Доля": (v / comp_total * 100) if comp_total else 0}
+            for k, v in sorted(composition.items(), key=lambda kv: -kv[1])
+        ]
+    )
+    st.dataframe(
+        comp_df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Доля": st.column_config.ProgressColumn("Доля", format="%.1f%%", min_value=0, max_value=100),
+        },
+    )
 
 st.divider()
 
 # ---------------- Текущие счета ----------------
-current = balance["bank"] + balance["cash"] + balance["crypto"]
-st.header(f"💳 Текущие счета · {_fmt_usd(_subtotal(current))}")
-_subheader("Банковские счета", balance["bank"])
-_subheader("Наличные", balance["cash"])
-_subheader("Криптовалюта", balance["crypto"])
+current_rows = (
+    [("Банк", it) for it in balance["bank"]]
+    + [("Наличные", it) for it in balance["cash"]]
+    + [("Крипта", it) for it in balance["crypto"]]
+)
+with st.container(border=True):
+    _block("Текущие счета", "💳", current_rows)
 
 # ---------------- Возвраты ----------------
-st.header(f"↩️ Возвраты · {_fmt_usd(_subtotal(balance['returns']))}")
-_block_table(balance["returns"])
+with st.container(border=True):
+    _block("Возвраты", "↩️", [("Возврат", it) for it in balance["returns"]])
 
 # ---------------- Инвестиции ----------------
-invest = balance["loans"] + balance["real_estate"] + balance["art"]
-st.header(f"📈 Инвестиции · {_fmt_usd(_subtotal(invest))}")
-_subheader("Займы", balance["loans"])
-_subheader("Недвижимость", balance["real_estate"])
-
-st.markdown("**Фондовый рынок**")
-_block_table(balance["frozen"], frozen=True)
-st.caption(f"🔒 Заблокированные по санкциям бумаги ({_fmt_usd(frozen_total)}) — показаны, но не входят в баланс.")
-
-_subheader("Искусство и коллекционирование", balance["art"])
+invest_rows = (
+    [("Займы", it) for it in balance["loans"]]
+    + [("Недвижимость", it) for it in balance["real_estate"]]
+    + [("Искусство", it) for it in balance["art"]]
+)
+with st.container(border=True):
+    _block("Инвестиции", "📈", invest_rows)
+    if balance["frozen"]:
+        st.markdown(f"###### 🔒 Фондовый рынок (вне баланса) · {_fmt_usd(frozen_total)}")
+        _cat_table([("Заблокировано", it) for it in balance["frozen"]], frozen=True)
+        st.caption("Заблокированные по санкциям бумаги — показаны, но не входят в баланс.")
 
 # ---------------- Баланс бизнеса ----------------
-st.header(f"🏢 Баланс бизнеса · {_fmt_usd(_subtotal(balance['business']))}")
-_block_table(balance["business"])
+with st.container(border=True):
+    _block("Баланс бизнеса", "🏢", [("Бизнес", it) for it in balance["business"]])
 
 # ---------------- Обязательства ----------------
 st.divider()
-st.header(f"🧾 Обязательства · {_fmt_usd(obligations_total)}")
-_block_table(balance["obligations"])
+with st.container(border=True):
+    _block("Обязательства", "🧾", [("Обязательство", it) for it in balance["obligations"]])
+
+# ---------------- Итого по портфелю ----------------
+st.divider()
+st.markdown("### 💼 Итого по портфелю")
+f1, f2, f3 = st.columns(3)
+f1.metric("Капитал", _fmt_usd(balance["grand_total"]))
+f2.metric("Обязательства", _fmt_usd(obligations_total))
+f3.metric("Заморожено (вне учёта)", _fmt_usd(frozen_total))
