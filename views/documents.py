@@ -29,14 +29,17 @@ documents = st.session_state["documents"]
 
 DOC_TYPES = [
     "Договор", "ДДУ", "Допсоглашение", "Акт приёма-передачи", "Счёт",
-    "Платёжное поручение", "Выписка", "Справка", "Свидетельство", "Иное",
+    "Платёжное поручение", "Выписка", "Справка", "Свидетельство",
+    "Документы на юрлицо", "Иное",
 ]
 
+CURRENCIES = ["$", "€", "₽"]
 
-def _fmt_amount(v):
+
+def _fmt_amount(v, currency="$"):
     if v in (None, "") or float(v) == 0:
         return "—"
-    return f"${float(v):,.0f}".replace(",", " ")
+    return f"{float(v):,.0f} {currency or '$'}".replace(",", " ")
 
 
 def _fmt_date(v):
@@ -58,9 +61,10 @@ with st.expander("➕ Добавить документ", expanded=not documents
         d_type = c1.selectbox("Тип документа", DOC_TYPES)
         d_date = c2.date_input("Дата", value=date.today(), format="DD.MM.YYYY")
         d_number = c3.text_input("Номер")
-        c4, c5 = st.columns([1, 3])
-        d_amount = c4.number_input("Сумма, $", min_value=0.0, value=0.0, step=100.0)
-        d_summary = c5.text_input("Суть — кратко")
+        c4, c5, c6 = st.columns([1, 1, 3])
+        d_amount = c4.number_input("Сумма", min_value=0.0, value=0.0, step=100.0)
+        d_currency = c5.selectbox("Валюта", CURRENCIES)
+        d_summary = c6.text_input("Суть — кратко")
         d_link = st.text_input("Ссылка на документ (Google Диск)")
         if st.form_submit_button("Добавить документ"):
             if d_link.strip() or d_summary.strip():
@@ -73,6 +77,7 @@ with st.expander("➕ Добавить документ", expanded=not documents
                     "date": d_date.isoformat(),
                     "number": d_number.strip(),
                     "amount": d_amount,
+                    "currency": d_currency,
                     "summary": d_summary.strip(),
                     "link": d_link.strip(),
                 })
@@ -99,7 +104,7 @@ for chosen in choices:
                 "Тип документа": d.get("type", ""),
                 "Дата": _fmt_date(d.get("date")),
                 "Номер": d.get("number", "") or "—",
-                "Сумма": _fmt_amount(d.get("amount")),
+                "Сумма": _fmt_amount(d.get("amount"), d.get("currency", "$")),
                 "Суть — кратко": d.get("summary", "") or "—",
                 "Ссылка": d.get("link", ""),
             }
