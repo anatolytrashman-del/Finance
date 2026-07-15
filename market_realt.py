@@ -151,10 +151,13 @@ def _category_label(obj):
 def _object_link(deal, category, code):
     """Статическая ссылка на объект — раздел URL берём из категории.
 
-    Слаги подтверждены реальными ссылками realt.by (категорийные страницы
-    /sale/<slug>/ и /rent/<slug>/, объектная — /<sale|rent>-<slug>/object/<code>/):
-    flats, offices, shops — подтверждены; «Другая коммерческая» — это
-    realt-овские «Помещения свободного назначения» (/sale/storages/).
+    Слаги подтверждены реальными ссылками объектов realt.by (проверено для
+    обеих сделок — продажи и аренды):
+      sale-flats, rent-flats       — Квартиры и апартаменты
+      sale-offices, rent-offices   — Офисы
+      sale-shops, rent-shops       — Торговые помещения
+      sale-pomeschenie, rent-pomeschenie — Другая коммерческая
+                                      (realt: «Помещения свободного назначения», ПСН)
 
     ВАЖНО: раньше здесь была живая проверка ссылки (HTTP-запрос на каждый
     вариант при каждом объявлении) — из-за неё обновление зависало на
@@ -163,8 +166,8 @@ def _object_link(deal, category, code):
         "Квартиры и апартаменты": "flats",
         "Офисы": "offices",
         "Торговые помещения": "shops",
-        "Другая коммерческая": "storages",
-    }.get(category, "storages")
+        "Другая коммерческая": "pomeschenie",
+    }.get(category, "pomeschenie")
     section_deal = "rent" if deal == "Аренда" else "sale"
     return f"https://realt.by/{section_deal}-{section_type}/object/{code}/"
 
