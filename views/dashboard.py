@@ -70,7 +70,7 @@ def _overlay_events(fig, mv, chart_key):
     if xs:
         fig.add_scatter(
             x=xs, y=ys, mode="markers", name="События",
-            marker=dict(symbol="star", size=15, color="#EF6C00",
+            marker=dict(symbol="circle", size=12, color="#EF6C00",
                         line=dict(color="white", width=1.5)),
             customdata=texts, hovertemplate="📌 %{customdata}<extra></extra>",
             showlegend=False, cliponaxis=False,

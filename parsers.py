@@ -26,12 +26,17 @@ def _series_by_label(ws, label: str) -> pd.DataFrame:
             for row in range(2, ws.max_row + 1):
                 d = ws.cell(row=row, column=col).value
                 v = ws.cell(row=row, column=col + 1).value
-                if d is None or v is None:
+                # значение может быть записано текстом («281 000», с неразрывным
+                # пробелом и т.п.) — приводим к числу, иначе точка встаёт не на ту
+                # высоту; нечисловые/пустые пропускаем
+                num = float(v) if isinstance(v, (int, float)) else parse_money(v)
+                if d is None or num is None:
                     continue
                 dates.append(d)
-                values.append(v)
+                values.append(num)
             df = pd.DataFrame({"date": pd.to_datetime(dates), "value": values})
-            return df.sort_values("date").reset_index(drop=True)
+            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+            return df.dropna(subset=["value"]).sort_values("date").reset_index(drop=True)
     return pd.DataFrame(columns=["date", "value"])
 
 
