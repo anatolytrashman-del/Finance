@@ -7,6 +7,7 @@ import streamlit as st
 from config import MONITORED_ADDRESSES
 from market_kufar import fetch_all as fetch_kufar
 from market_realt import fetch_all as fetch_realt
+from market_realt import verify_links as verify_realt_links
 from market_store import (
     append_archive,
     append_history_snapshot,
@@ -75,10 +76,16 @@ def _refresh():
         r_listings, r_warnings = fetch_realt(MONITORED_ADDRESSES)
     for l in r_listings:
         l["source"] = "realt.by"
-    listings += r_listings
     warnings += r_warnings
 
-    if not listings:
+    with st.spinner("Проверяю ссылки realt.by (до 25 секунд)..."):
+        broken_link_ids = verify_realt_links(r_listings)
+    broken_listings = [l for l in r_listings if l["id"] in broken_link_ids]
+    r_listings = [l for l in r_listings if l["id"] not in broken_link_ids]
+
+    listings += r_listings
+
+    if not listings and not broken_listings:
         st.session_state["market_error"] = (
             "Не удалось получить объявления. " + "; ".join(warnings) if warnings else
             "Не удалось получить объявления (пустой ответ)."
@@ -119,10 +126,20 @@ def _refresh():
         else:
             l["is_new"] = False
 
-    # объявления, которые были в прошлой выдаче, но пропали из новой — в архив
-    current_ids = {l["id"] for l in listings}
+    # ссылка не открылась ни разу за отведённое время проверки — в архив,
+    # не показываем её живой в списке с мёртвой ссылкой
+    archive_records = [
+        _archive_entry(l, "Битая ссылка (404)", seen.pop(l["id"], l.get("listed_at") or today_iso))
+        for l in broken_listings
+    ]
+    if broken_listings:
+        warnings.append(
+            f"{len(broken_listings)} объявление(й) realt.by не открылось по ссылке — отправлено в архив."
+        )
+
+    # объявления, которые были в прошлой выдаче, но пропали из новой — тоже в архив
+    current_ids = {l["id"] for l in listings} | {l["id"] for l in broken_listings}
     archived_ids = set(old_by_id) - current_ids
-    archive_records = []
     for aid in archived_ids:
         old = old_by_id[aid]
         first_seen = seen.pop(aid, old.get("listed_at") or today_iso)

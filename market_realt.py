@@ -21,6 +21,7 @@ realt.by — главный ресурс по коммерческой недв�
 есть блок rates с курсами — переводим всё в доллары. Схема результата та же,
 что у market_kufar, чтобы источники объединялись на странице «Рынок».
 """
+import concurrent.futures
 import time
 
 import requests
@@ -318,3 +319,59 @@ def fetch_all(addresses):
 
     unique = {l["id"]: l for l in all_listings}
     return list(unique.values()), all_warnings
+
+
+# --- Проверка ссылок ---------------------------------------------------
+#
+# Раздел URL берётся из статического маппинга (_object_link) — он верный,
+# но ссылка всё равно может не открыться: дубли одного объявления под
+# разными code, или объект уже сняли с публикации, а он ещё доезжает в
+# поисковой выдаче. Раньше здесь была последовательная проверка
+# нескольких вариантов URL на объявление — это умножалось на количество
+# объявлений и подвешивало обновление на десятки минут. Теперь: один запрос
+# на объявление, все параллельно, с жёстким лимитом по времени на всю пачку.
+
+LINK_CHECK_WORKERS = 10
+LINK_CHECK_TIMEOUT = 4    # таймаут одного запроса, сек
+LINK_CHECK_BUDGET = 25    # общий лимит на всю проверку, сек
+
+
+def _check_one_link(url):
+    try:
+        resp = requests.head(url, headers=HEADERS, timeout=LINK_CHECK_TIMEOUT, allow_redirects=True)
+        if resp.status_code in (405, 403):  # HEAD не поддерживается/заблокирован — пробуем GET
+            resp = requests.get(url, headers=HEADERS, timeout=LINK_CHECK_TIMEOUT, allow_redirects=True, stream=True)
+            resp.close()
+        return resp.status_code == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def verify_links(listings):
+    """Параллельно проверяет ссылки объявлений realt (один запрос на объявление,
+    жёсткий лимит по времени на всю пачку — не может зависнуть). Возвращает
+    множество id объявлений, чья ссылка не открылась (404/ошибка).
+
+    Объявления, чью ссылку не успели проверить за отведённое время, НЕ
+    считаются битыми — просто перепроверим при следующем обновлении."""
+    targets = [l for l in listings if l.get("id", "").startswith("realt-") and l.get("link")]
+    if not targets:
+        return set()
+
+    broken_ids = set()
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=LINK_CHECK_WORKERS)
+    try:
+        future_to_id = {executor.submit(_check_one_link, l["link"]): l["id"] for l in targets}
+        done, _pending = concurrent.futures.wait(future_to_id, timeout=LINK_CHECK_BUDGET)
+        for future in done:
+            try:
+                ok = future.result()
+            except Exception:  # noqa: BLE001
+                ok = False
+            if not ok:
+                broken_ids.add(future_to_id[future])
+    finally:
+        # не ждём «зависшие» запросы — они доработают в фоне и сами закроются
+        # по своему таймауту, но мы не блокируем на них весь refresh
+        executor.shutdown(wait=False, cancel_futures=True)
+    return broken_ids
