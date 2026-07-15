@@ -1,12 +1,27 @@
+import uuid
+from datetime import date
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from data_source import load_asset_allocation, load_progress, sidebar_refresh_control
+from events_store import load_events, save_events
 
 sidebar_refresh_control()
 
 st.title("📊 Дашборд капитала")
+
+# Графики, к которым можно привязывать события-комментарии
+CHART_OPTIONS = {
+    "capital_usd": "Капитал, $",
+    "debt": "Долговая нагрузка, $",
+    "active_income": "Активный доход",
+    "passive_income": "Пассивный доход",
+}
+
+if "events" not in st.session_state:
+    st.session_state["events"] = load_events()
 
 data = load_progress()
 if data is None:
@@ -28,13 +43,49 @@ def monthly_view(df):
     return df[keep].reset_index(drop=True)
 
 
-def line_chart(df, y_label, color):
+def _overlay_events(fig, mv, chart_key):
+    """Ставит маркеры-звёздочки событий на линию (привязка к ближайшему замеру).
+
+    События вне диапазона ряда (± ~месяц) пропускаются."""
+    events = st.session_state.get("events") or []
+    if mv is None or mv.empty:
+        return
+    mv = mv.sort_values("date").reset_index(drop=True)
+    lo = mv["date"].min() - pd.Timedelta(days=31)
+    hi = mv["date"].max() + pd.Timedelta(days=31)
+    xs, ys, texts = [], [], []
+    for ev in events:
+        if chart_key not in (ev.get("charts") or []):
+            continue
+        try:
+            d = pd.to_datetime(ev["date"])
+        except Exception:  # noqa: BLE001
+            continue
+        if d < lo or d > hi:
+            continue
+        idx = (mv["date"] - d).abs().idxmin()
+        xs.append(mv.loc[idx, "date"])
+        ys.append(mv.loc[idx, "value"])
+        texts.append(f"{d:%d.%m.%Y}<br>{ev.get('comment', '')}")
+    if xs:
+        fig.add_scatter(
+            x=xs, y=ys, mode="markers", name="События",
+            marker=dict(symbol="star", size=15, color="#EF6C00",
+                        line=dict(color="white", width=1.5)),
+            customdata=texts, hovertemplate="📌 %{customdata}<extra></extra>",
+            showlegend=False, cliponaxis=False,
+        )
+
+
+def line_chart(df, y_label, color, chart_key=None):
     if df is None or df.empty:
         st.warning("Нет данных для отображения.")
         return
     df = monthly_view(df)
     fig = px.line(df, x="date", y="value", markers=True)
     fig.update_traces(line_color=color)
+    if chart_key:
+        _overlay_events(fig, df, chart_key)
     fig.update_layout(
         xaxis_title=None,
         yaxis_title=y_label,
@@ -134,10 +185,46 @@ with kpi2:
 
 st.divider()
 
+# --- События-комментарии к графикам (звёздочки поверх линий) ---
+events = st.session_state["events"]
+with st.expander(f"📌 События на графиках ({len(events)})"):
+    st.caption("Отмечают особые решения (напр. «убрал из оценки технику и искусство»). "
+               "Появляются звёздочкой на выбранных графиках, при наведении — дата и текст.")
+    with st.form("add_event", clear_on_submit=True):
+        ec1, ec2 = st.columns([1, 3])
+        ev_date = ec1.date_input("Дата", value=date.today(), format="DD.MM.YYYY")
+        ev_comment = ec2.text_input("Комментарий")
+        ev_charts = st.multiselect(
+            "На каких графиках показать",
+            options=list(CHART_OPTIONS), format_func=lambda k: CHART_OPTIONS[k],
+            default=["capital_usd"],
+        )
+        if st.form_submit_button("Добавить событие"):
+            if ev_comment.strip() and ev_charts:
+                events.append({
+                    "id": str(uuid.uuid4()), "date": ev_date.isoformat(),
+                    "comment": ev_comment.strip(), "charts": ev_charts,
+                })
+                save_events(events)
+                st.rerun()
+            else:
+                st.warning("Заполни комментарий и выбери хотя бы один график.")
+
+    if events:
+        for ev in sorted(events, key=lambda e: e.get("date", "")):
+            r1, r2, r3, r4 = st.columns([2, 6, 3, 1])
+            r1.write(pd.to_datetime(ev["date"]).strftime("%d.%m.%Y"))
+            r2.write(ev.get("comment", ""))
+            r3.caption(", ".join(CHART_OPTIONS.get(k, k) for k in ev.get("charts", [])))
+            if r4.button("🗑", key=f"ev_del_{ev['id']}", help="Удалить событие"):
+                st.session_state["events"] = [x for x in events if x["id"] != ev["id"]]
+                save_events(st.session_state["events"])
+                st.rerun()
+
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Капитал, $")
-    line_chart(capital_usd, "USD", "#2E7D32")
+    line_chart(capital_usd, "USD", "#2E7D32", chart_key="capital_usd")
 with col2:
     st.subheader("Капитал, ₽")
     line_chart(capital_rub, "RUB", "#1565C0")
@@ -198,7 +285,7 @@ col5, col6 = st.columns(2)
 with col5:
     st.subheader("Долговая нагрузка, $")
     st.caption("Значения без даты в исходной таблице пропущены")
-    line_chart(debt, "USD", "#C62828")
+    line_chart(debt, "USD", "#C62828", chart_key="debt")
 with col6:
     st.subheader("Структура капитала по классам активов")
     allocation = load_asset_allocation()
@@ -214,7 +301,7 @@ st.divider()
 col7, col8 = st.columns(2)
 with col7:
     st.subheader("Активный доход, $")
-    line_chart(data.get("active_income"), "USD", "#1565C0")
+    line_chart(data.get("active_income"), "USD", "#1565C0", chart_key="active_income")
 with col8:
     st.subheader("Пассивный доход, $")
-    line_chart(data.get("passive_income"), "USD", "#6A1B9A")
+    line_chart(data.get("passive_income"), "USD", "#6A1B9A", chart_key="passive_income")
