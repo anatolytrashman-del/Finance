@@ -114,14 +114,3 @@ for chosen in choices:
             table, width="stretch", hide_index=True,
             column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
         )
-
-        with st.expander(f"🗑 Удалить документ ({len(obj_docs)})"):
-            labels = {
-                f"{d.get('type', '')} №{d.get('number') or '—'} · {_fmt_date(d.get('date'))} · {d.get('summary', '')}"[:80]: d["id"]
-                for d in obj_docs
-            }
-            to_del = st.selectbox("Выбери документ", list(labels), key=f"del_sel_{chosen['key']}")
-            if st.button("Удалить", key=f"del_btn_{chosen['key']}"):
-                st.session_state["documents"] = [x for x in documents if x["id"] != labels[to_del]]
-                save_documents(st.session_state["documents"])
-                st.rerun()
