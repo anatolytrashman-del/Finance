@@ -44,6 +44,15 @@ def _category_label(ad, params):
     return None
 
 
+def _first_val(param_entry):
+    """Первое значение параметра kufar (структура {'v': [...]})."""
+    try:
+        vals = (param_entry or {}).get("v") or []
+        return vals[0] if vals else None
+    except (TypeError, AttributeError):
+        return None
+
+
 def _parse_ad(ad, house_tag, address_label):
     params = _param_map(ad)
     tags = (params.get("address_tags_yandex") or {}).get("v") or []
@@ -82,6 +91,8 @@ def _parse_ad(ad, house_tag, address_label):
         "price_usd": price_usd,
         "ppm": ppm,
         "rooms": (params.get("rooms") or {}).get("v"),
+        "floor": _first_val(params.get("floor")),
+        "floors_total": _first_val(params.get("re_number_floors")),
         "link": ad.get("ad_link") or "",
         "listed_at": (ad.get("list_time") or "")[:10],
     }

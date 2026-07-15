@@ -67,7 +67,7 @@ SEARCH_QUERY = (
     "      results {\n"
     "        uuid code category objectType houseNumber streetName streetUuid townName\n"
     "        price priceCurrency pricePerM2 areaTotal rooms termOfLease leasePeriod\n"
-    "        title headline createdAt updatedAt raiseDate __typename\n"
+    "        storey storeys title headline createdAt updatedAt raiseDate __typename\n"
     "      }\n"
     "      rates { from to rate __typename }\n"
     "      __typename\n"
@@ -199,6 +199,8 @@ def _parse_object(obj, house, address_label, rates):
         "price_usd": price_usd,
         "ppm": ppm,
         "rooms": obj.get("rooms"),
+        "floor": obj.get("storey"),
+        "floors_total": obj.get("storeys"),
         "link": _object_link(deal, category, code),
         "listed_at": listed_at,
     }

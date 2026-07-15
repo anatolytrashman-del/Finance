@@ -33,6 +33,16 @@ def _fmt_money(v):
     return f"${v:,.0f}".replace(",", " ")
 
 
+def _fmt_floor(row):
+    floor, total = row.get("floor"), row.get("floors_total")
+    floor_ok = floor is not None and not pd.isna(floor)
+    total_ok = total is not None and not pd.isna(total)
+    if not floor_ok:
+        return "—"
+    floor_str = str(int(floor))
+    return f"{floor_str}/{int(total)}" if total_ok else floor_str
+
+
 def _summary_rows(df):
     rows = []
     for (address, deal, category), g in df.groupby(["address", "deal", "category"]):
@@ -146,6 +156,9 @@ if "is_new" not in df.columns:
 df["is_new"] = df["is_new"].fillna(False)
 if "source" not in df.columns:
     df["source"] = "kufar.by"
+for col in ("floor", "floors_total"):
+    if col not in df.columns:
+        df[col] = None
 
 # ---------------- Общий фильтр ----------------
 with st.expander("🔍 Фильтры", expanded=False):
@@ -213,6 +226,7 @@ for addr in MONITORED_ADDRESSES:
         table["Цена метра"] = table["ppm"].apply(lambda v: _fmt_money(v) if pd.notna(v) else "—")
         table["Статус"] = table["is_new"].apply(lambda v: "🆕 Новое" if v else "")
         table["Комментарий"] = table["id"].apply(lambda i: comments.get(i, ""))
+        table["Этаж"] = table.apply(_fmt_floor, axis=1)
         table = table.rename(
             columns={
                 "deal": "Сделка",
@@ -225,7 +239,7 @@ for addr in MONITORED_ADDRESSES:
             }
         )
         visible_cols = ["Статус", "Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²",
-                         "Цена", "Цена метра", "Размещено", "Ссылка", "Комментарий"]
+                         "Этаж", "Цена", "Цена метра", "Размещено", "Ссылка", "Комментарий"]
         edited = st.data_editor(
             table[["id", *visible_cols]],
             key=f"listings_editor_{label}",
