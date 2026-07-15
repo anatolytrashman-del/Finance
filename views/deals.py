@@ -58,8 +58,12 @@ def _generate_rent_rows(columns):
             row[ASSET_COL] = "Недвижимость"
         if PROFIT_COL in row:
             row[PROFIT_COL] = RENT_MONTHLY
+        if "Назначение" in row:
+            row["Назначение"] = "Аренда квартиры в Новой Боровой"
+        if "Контрагент" in row:
+            row["Контрагент"] = "Рита"
         if "Объект" in row:
-            row["Объект"] = "Квартира (аренда)"
+            row["Объект"] = "Новая Боровая"
         rows.append(row)
     return pd.DataFrame(rows, columns=columns)
 
