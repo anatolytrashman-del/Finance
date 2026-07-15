@@ -4,75 +4,74 @@
 карте (полигон координат). Схема (вскрыта через avito_scout.py и реальный
 дамп сетевых запросов):
 
-  1. POST /web/1/saveDrawArea   {"drawArea": base64(json{"coordinates":[[[lon,lat],...]]})}
+  1. POST /web/1/saveDrawArea   {"drawArea": base64(json{"coordinates":[[[lon,lat],...]],"type":"Polygon"})}
      -> {"drawId": "..."}
      Полигон каждый раз отправляется заново (не полагаемся на то, что
      сохранённый ранее drawId ещё жив — TTL неизвестен).
   2. GET /js/1/map/items?categoryId=...&locationId=...&drawId=...&...
      -> {"totalCount": N, "items": [...]}
 
-ВАЖНО: Avito крупнее и обычно жёстче защищён от ботов, чем kufar/realt.
-Разведка (avito_scout.py) ходила настоящим браузером, поэтому антибот не
-успели проверить против обычных requests-запросов — если сайт начнёт
-возвращать не JSON, а капчу/HTML — сразу увидим это по ошибке разбора
-ответа (see _get_json) и вернём внятное предупреждение, а не упадём молча.
+ВАЖНО: Avito жёстче защищён от ботов, чем kufar/realt — простые запросы
+через requests с браузерными заголовками получают 403 (проверено на живом
+запуске). Поэтому здесь запросы идут не через requests, а через настоящий
+headless-браузер (Playwright), причём сами HTTP-вызовы делаются функцией
+fetch() ИЗНУТРИ открытой страницы avito.ru — так автоматически совпадают
+все cookies/заголовки/TLS-отпечаток с тем, что видел бы обычный браузер
+(именно так работала разведка avito_scout.py, и там блокировок не было).
+Требует: python3 -m playwright install chromium (один раз на машине).
 """
 import base64
 import json
 import re
 import time
+import urllib.parse
 
-import requests
+PAGE_SIZE = 10  # у Avito лимит объектов на страницу карты — 10 (limit=10 в наблюдённом запросе)
+MAX_PAGES = 20
+PAGE_PAUSE_SEC = 1.0
 
 ENDPOINT_SAVE_AREA = "https://www.avito.ru/web/1/saveDrawArea"
 ENDPOINT_ITEMS = "https://www.avito.ru/js/1/map/items"
 
-HEADERS = {
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "ru-RU,ru;q=0.9",
-    "Content-Type": "application/json",
-    "Origin": "https://www.avito.ru",
-    "Referer": "https://www.avito.ru/",
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
-}
-
-PAGE_SIZE = 10  # у Avito лимит объектов на страницу карты —10 (limit=10 в наблюдённом запросе)
-MAX_PAGES = 20
-PAGE_PAUSE_SEC = 1.0
-
 _AREA_RE = re.compile(r"(\d[\d.,]*)\s*(сот|га)", re.IGNORECASE)
 _TYPE_RE = re.compile(r"\(([^)]+)\)\s*$")
 
+_FETCH_JS = """
+async ({method, url, body}) => {
+    const opts = {method, credentials: "include"};
+    if (body !== null) {
+        opts.headers = {"Content-Type": "application/json"};
+        opts.body = JSON.stringify(body);
+    }
+    const resp = await fetch(url, opts);
+    const text = await resp.text();
+    return {status: resp.status, text};
+}
+"""
 
-def _get_json(resp, context):
-    """Разбирает JSON-ответ; если пришёл не JSON (капча/блокировка) —
-    кидает понятную ошибку вместо непонятного JSONDecodeError глубоко внутри."""
+
+def _pw_fetch_json(page, method, url, body=None):
+    """fetch() внутри открытой страницы браузера — не голый requests, чтобы
+    антибот не отличал нас от настоящего пользователя (см. докстринг модуля)."""
+    result = page.evaluate(_FETCH_JS, {"method": method, "url": url, "body": body})
+    status, text = result["status"], result["text"]
+    if status >= 400:
+        raise RuntimeError(f"{method} {url.split('?')[0]} -> HTTP {status}: {text[:200]!r}")
     try:
-        return resp.json()
+        return json.loads(text)
     except ValueError as exc:
-        snippet = resp.text[:200].replace("\n", " ")
         raise RuntimeError(
-            f"{context}: сервер вернул не JSON (возможно, антибот-защита/капча). "
-            f"HTTP {resp.status_code}, начало ответа: {snippet!r}"
+            f"{method} {url.split('?')[0]}: сервер вернул не JSON "
+            f"(возможно, антибот-защита/капча): {text[:200]!r}"
         ) from exc
 
 
-def save_draw_area(polygon):
+def _save_draw_area(page, polygon):
     """polygon: [[lon, lat], ...] — замкнутый контур. Возвращает drawId."""
     # separators без пробелов — как JSON.stringify в браузере, откуда взят формат
     inner = json.dumps({"coordinates": [polygon], "type": "Polygon"}, ensure_ascii=False, separators=(",", ":"))
     draw_area_b64 = base64.b64encode(inner.encode("utf-8")).decode("ascii")
-    resp = requests.post(
-        ENDPOINT_SAVE_AREA,
-        headers=HEADERS,
-        json={"drawArea": draw_area_b64},
-        timeout=20,
-    )
-    resp.raise_for_status()
-    data = _get_json(resp, "saveDrawArea")
+    data = _pw_fetch_json(page, "POST", ENDPOINT_SAVE_AREA, {"drawArea": draw_area_b64})
     draw_id = data.get("drawId")
     if not draw_id:
         raise RuntimeError(f"saveDrawArea: в ответе нет drawId: {data}")
@@ -118,22 +117,21 @@ def _parse_item(item):
     }
 
 
-def fetch_area(area_config):
+def _fetch_area(page, area_config):
     """Собирает все объявления в нарисованной области. Возвращает (listings, warnings)."""
     name = area_config["name"]
-    warnings = []
     try:
-        draw_id = save_draw_area(area_config["polygon"])
+        draw_id = _save_draw_area(page, area_config["polygon"])
     except Exception as exc:  # noqa: BLE001
         return [], [f"avito «{name}»: не удалось сохранить область ({exc})"]
 
     listings, seen_ids = [], set()
-    for page in range(1, MAX_PAGES + 1):
+    for page_num in range(1, MAX_PAGES + 1):
         params = {
             "categoryId": area_config["category_id"],
             "locationId": area_config["location_id"],
             "correctorMode": 0,
-            "page": page,
+            "page": page_num,
             "map": "e30=",  # {} — пустой viewport-параметр; фильтрует drawId, не map
             "verticalCategoryId": area_config["vertical_category_id"],
             "rootCategoryId": area_config["root_category_id"],
@@ -144,14 +142,13 @@ def fetch_area(area_config):
         }
         for key, value in (area_config.get("extra_params") or {}).items():
             params[f"params[{key}]"] = value
+        url = f"{ENDPOINT_ITEMS}?{urllib.parse.urlencode(params)}"
 
         try:
-            resp = requests.get(ENDPOINT_ITEMS, headers=HEADERS, params=params, timeout=20)
-            resp.raise_for_status()
-            data = _get_json(resp, f"map/items стр.{page}")
+            data = _pw_fetch_json(page, "GET", url)
         except Exception as exc:  # noqa: BLE001
-            warnings.append(f"avito «{name}»: страница {page} не загрузилась ({exc})")
-            break
+            warnings_msg = f"avito «{name}»: страница {page_num} не загрузилась ({exc})"
+            return listings, [warnings_msg]
 
         items = data.get("items") or []
         new_items = [it for it in items if str(it.get("id")) not in seen_ids]
@@ -168,16 +165,48 @@ def fetch_area(area_config):
             break
         time.sleep(PAGE_PAUSE_SEC)
 
-    return listings, warnings
+    return listings, []
 
 
 def fetch_all(areas):
-    """Собирает объявления по всем настроенным областям."""
+    """Собирает объявления по всем настроенным областям через headless-браузер."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return [], [
+            "avito: не установлен playwright. Выполни: pip install playwright && "
+            "python3 -m playwright install chromium"
+        ]
+
     all_listings, all_warnings = [], []
-    for area in areas:
-        listings, warnings = fetch_area(area)
-        all_listings.extend(listings)
-        all_warnings.extend(warnings)
-        time.sleep(PAGE_PAUSE_SEC)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(
+                viewport={"width": 1440, "height": 1000},
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                ),
+            )
+            try:
+                page.goto("https://www.avito.ru/", wait_until="domcontentloaded", timeout=30000)
+            except Exception as exc:  # noqa: BLE001
+                browser.close()
+                return [], [f"avito: не удалось открыть сайт для получения cookies ({exc})"]
+
+            for area in areas:
+                listings, warnings = _fetch_area(page, area)
+                all_listings.extend(listings)
+                all_warnings.extend(warnings)
+                time.sleep(PAGE_PAUSE_SEC)
+
+            browser.close()
+    except Exception as exc:  # noqa: BLE001
+        return [], [
+            f"avito: браузер не запустился ({exc}). Проверь: "
+            f"python3 -m playwright install chromium"
+        ]
+
     unique = {l["id"]: l for l in all_listings}
     return list(unique.values()), all_warnings

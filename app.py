@@ -12,7 +12,6 @@ documents = st.Page("views/documents.py", title="Архив документов
 ideas = st.Page("views/ideas.py", title="Инвест-идеи", icon="💡")
 finmodel = st.Page("views/finmodel.py", title="Финмодель", icon="🧮")
 market = st.Page("views/market.py", title="Анализ рынка", icon="🏷️")
-land = st.Page("views/land.py", title="Земельные участки", icon="🌾")
 
-nav = st.navigation([dashboard, balance, deals, real_estate, documents, ideas, finmodel, market, land])
+nav = st.navigation([dashboard, balance, deals, real_estate, documents, ideas, finmodel, market])
 nav.run()
