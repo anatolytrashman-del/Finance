@@ -148,15 +148,40 @@ def _category_label(obj):
     return "Другая коммерческая"
 
 
-def _object_link(deal, category, code):
-    section_type = {
-        "Квартиры и апартаменты": "flats",
-        "Офисы": "offices",
-        "Торговые помещения": "shops",
-        "Другая коммерческая": "commercial",
-    }.get(category, "commercial")
+def _link_candidates(deal, category, code):
+    """Варианты URL объекта realt для проверки: раздел различается по категории,
+    и мы это лишь угадываем (подтверждено на реальных данных только для
+    «flats» и «offices») — поэтому пробуем несколько и берём рабочий."""
     section_deal = "rent" if deal == "Аренда" else "sale"
-    return f"https://realt.by/{section_deal}-{section_type}/object/{code}/"
+    slug_guesses = {
+        "Квартиры и апартаменты": ["flats"],
+        "Офисы": ["offices"],
+        "Торговые помещения": ["shops", "trade-premises", "commercial", "premises"],
+        "Другая коммерческая": ["commercial", "premises", "offices"],
+    }.get(category, ["commercial"])
+    urls = [f"https://realt.by/object/{code}/"]  # возможный короткий канонический формат
+    urls += [f"https://realt.by/{section_deal}-{slug}/object/{code}/" for slug in slug_guesses]
+    return urls
+
+
+def _check_url(url):
+    try:
+        resp = requests.head(url, headers=HEADERS, timeout=6, allow_redirects=True)
+        if resp.status_code in (405, 403):  # HEAD не поддерживается/заблокирован — пробуем GET
+            resp = requests.get(url, headers=HEADERS, timeout=8, allow_redirects=True, stream=True)
+            resp.close()
+        return resp.status_code == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolve_link(deal, category, code):
+    """Проверяет варианты URL объекта живьём, возвращает первый рабочий (или None,
+    если ни один не открылся — тогда объявление стоит считать недоступным)."""
+    for url in _link_candidates(deal, category, code):
+        if _check_url(url):
+            return url
+    return None
 
 
 def _parse_object(obj, house, address_label, rates):
@@ -189,6 +214,7 @@ def _parse_object(obj, house, address_label, rates):
 
     code = obj.get("code")
     listed_at = (obj.get("updatedAt") or obj.get("createdAt") or obj.get("raiseDate") or "")[:10]
+    resolved_link = _resolve_link(deal, category, code)
     return {
         "id": f"realt-{code}",
         "address": address_label,
@@ -201,7 +227,8 @@ def _parse_object(obj, house, address_label, rates):
         "rooms": obj.get("rooms"),
         "floor": obj.get("storey"),
         "floors_total": obj.get("storeys"),
-        "link": _object_link(deal, category, code),
+        "link": resolved_link or _link_candidates(deal, category, code)[1],
+        "link_verified": resolved_link is not None,
         "listed_at": listed_at,
     }
 

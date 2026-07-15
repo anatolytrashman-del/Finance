@@ -88,8 +88,35 @@ def _refresh():
     today_iso = date.today().isoformat()
     old_cache = load_listings()
     old_by_id = {l["id"]: l for l in (old_cache or {}).get("listings", [])} if old_cache else {}
-
     seen = load_seen()
+
+    def _archive_entry(item, reason, first_seen):
+        try:
+            exposure_days = (date.today() - date.fromisoformat(first_seen[:10])).days
+        except Exception:  # noqa: BLE001
+            exposure_days = None
+        return {
+            "id": item.get("id"),
+            "address": item.get("address"),
+            "deal": item.get("deal"),
+            "category": item.get("category"),
+            "title": item.get("title"),
+            "area": item.get("area"),
+            "price_usd": item.get("price_usd"),
+            "ppm": item.get("ppm"),
+            "source": item.get("source"),
+            "reason": reason,
+            "first_seen": first_seen,
+            "removed_at": today_iso,
+            "exposure_days": exposure_days,
+        }
+
+    # ссылки realt проверяются вживую при разборе (см. market_realt._resolve_link);
+    # если ни один вариант URL не открылся — не показываем мёртвую ссылку в списке,
+    # а сразу отправляем объявление в архив с пометкой «битая ссылка»
+    broken = [l for l in listings if not l.get("link_verified", True)]
+    listings = [l for l in listings if l.get("link_verified", True)]
+
     is_first_run = len(seen) == 0
     for l in listings:
         if l["id"] not in seen:
@@ -98,34 +125,28 @@ def _refresh():
         else:
             l["is_new"] = False
 
-    # объявления, которые были в прошлой выдаче, но пропали из новой — в архив
-    current_ids = {l["id"] for l in listings}
+    archive_records = [
+        _archive_entry(l, "Битая ссылка (не открылась)", seen.pop(l["id"], today_iso))
+        for l in broken
+    ]
+
+    # объявления, которые были в прошлой выдаче, но пропали из новой — тоже в архив
+    current_ids = {l["id"] for l in listings} | {l["id"] for l in broken}
     archived_ids = set(old_by_id) - current_ids
-    archive_records = []
     for aid in archived_ids:
         old = old_by_id[aid]
         first_seen = seen.pop(aid, old.get("listed_at") or today_iso)
-        try:
-            exposure_days = (date.today() - date.fromisoformat(first_seen[:10])).days
-        except Exception:  # noqa: BLE001
-            exposure_days = None
-        archive_records.append({
-            "id": aid,
-            "address": old.get("address"),
-            "deal": old.get("deal"),
-            "category": old.get("category"),
-            "title": old.get("title"),
-            "area": old.get("area"),
-            "price_usd": old.get("price_usd"),
-            "ppm": old.get("ppm"),
-            "source": old.get("source"),
-            "first_seen": first_seen,
-            "removed_at": today_iso,
-            "exposure_days": exposure_days,
-        })
+        archive_records.append(_archive_entry(old, "Ушло с сайта", first_seen))
+
     if archive_records:
         append_archive(archive_records)
     save_seen(seen)
+
+    if broken:
+        warnings.append(
+            f"{len(broken)} объявление(й) realt.by с битой ссылкой отправлено в архив "
+            f"(не открылась ни одна из проверенных ссылок)."
+        )
 
     cache = save_listings(listings, warnings)
     append_history_snapshot(_summary_rows(pd.DataFrame(listings)))
@@ -306,6 +327,9 @@ with st.expander(f"📦 Архив ушедших объявлений ({len(arc
         )
     else:
         adf = pd.DataFrame(archive)
+        if "reason" not in adf.columns:
+            adf["reason"] = "Ушло с сайта"
+        adf["reason"] = adf["reason"].fillna("Ушло с сайта")
         adf["Цена"] = adf["price_usd"].apply(_fmt_money)
         adf["Цена метра"] = adf["ppm"].apply(lambda v: _fmt_money(v) if pd.notna(v) else "—")
         adf = adf.rename(
@@ -315,6 +339,7 @@ with st.expander(f"📦 Архив ушедших объявлений ({len(arc
                 "category": "Категория",
                 "title": "Заголовок",
                 "area": "Площадь, м²",
+                "reason": "Причина",
                 "first_seen": "Появилось",
                 "removed_at": "Ушло в архив",
                 "exposure_days": "Срок экспозиции, дней",
@@ -323,7 +348,7 @@ with st.expander(f"📦 Архив ушедших объявлений ({len(arc
         adf = adf.sort_values("Ушло в архив", ascending=False)
         st.dataframe(
             adf[["Адрес", "Сделка", "Категория", "Заголовок", "Площадь, м²", "Цена", "Цена метра",
-                 "Появилось", "Ушло в архив", "Срок экспозиции, дней"]],
+                 "Причина", "Появилось", "Ушло в архив", "Срок экспозиции, дней"]],
             width="stretch",
             hide_index=True,
         )
