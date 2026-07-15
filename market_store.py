@@ -8,6 +8,9 @@ from pathlib import Path
 BASE_DIR = Path.home() / ".trashman_family_office"
 LISTINGS_PATH = BASE_DIR / "market_listings.json"
 HISTORY_PATH = BASE_DIR / "market_history.json"
+SEEN_PATH = BASE_DIR / "market_seen.json"
+ARCHIVE_PATH = BASE_DIR / "market_archive.json"
+COMMENTS_PATH = BASE_DIR / "market_comments.json"
 
 
 def load_listings():
@@ -52,3 +55,63 @@ def append_history_snapshot(rows):
     history.sort(key=lambda s: s.get("date", ""))
     HISTORY_PATH.write_text(json.dumps(history, ensure_ascii=False, indent=1), encoding="utf-8")
     return history
+
+
+# --- Отслеживание «новых» объявлений и архив ушедших -----------------------
+
+def load_seen():
+    """{id: дата_первого_появления_iso}. Нужно, чтобы отличать новые объявления
+    и считать срок экспозиции ушедших в архив."""
+    if SEEN_PATH.exists():
+        try:
+            data = json.loads(SEEN_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def save_seen(seen):
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    SEEN_PATH.write_text(json.dumps(seen, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def load_archive():
+    if ARCHIVE_PATH.exists():
+        try:
+            data = json.loads(ARCHIVE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data
+        except Exception:  # noqa: BLE001
+            return []
+    return []
+
+
+def append_archive(records):
+    """Добавляет записи об объявлениях, пропавших из последней выдачи."""
+    if not records:
+        return load_archive()
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    archive = load_archive()
+    archive.extend(records)
+    ARCHIVE_PATH.write_text(json.dumps(archive, ensure_ascii=False, indent=1), encoding="utf-8")
+    return archive
+
+
+# --- Комментарии к объявлениям (переживают обновления, привязаны к id) -----
+
+def load_comments():
+    if COMMENTS_PATH.exists():
+        try:
+            data = json.loads(COMMENTS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def save_comments(comments):
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    COMMENTS_PATH.write_text(json.dumps(comments, ensure_ascii=False, indent=1), encoding="utf-8")

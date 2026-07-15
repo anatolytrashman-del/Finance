@@ -1,3 +1,5 @@
+from datetime import date
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -5,10 +7,24 @@ import streamlit as st
 from config import MONITORED_ADDRESSES
 from market_kufar import fetch_all as fetch_kufar
 from market_realt import fetch_all as fetch_realt
-from market_store import append_history_snapshot, load_history, load_listings, save_listings
+from market_store import (
+    append_archive,
+    append_history_snapshot,
+    load_archive,
+    load_comments,
+    load_history,
+    load_listings,
+    load_seen,
+    save_comments,
+    save_listings,
+    save_seen,
+)
 
-st.title("🏷️ Рынок: объявления по моим адресам")
+st.title("🏷️ Анализ рынка")
 st.caption("Источники: kufar.by, realt.by · " + " · ".join(a["label"] for a in MONITORED_ADDRESSES))
+
+DEAL_ORDER = ["Продажа", "Аренда"]
+CATEGORY_ORDER = ["Квартиры и апартаменты", "Торговые помещения", "Офисы", "Другая коммерческая"]
 
 
 def _fmt_money(v):
@@ -52,15 +68,58 @@ def _refresh():
     listings += r_listings
     warnings += r_warnings
 
-    if listings:
-        cache = save_listings(listings, warnings)
-        append_history_snapshot(_summary_rows(pd.DataFrame(listings)))
-        st.session_state["market_cache"] = cache
-    else:
+    if not listings:
         st.session_state["market_error"] = (
             "Не удалось получить объявления. " + "; ".join(warnings) if warnings else
             "Не удалось получить объявления (пустой ответ)."
         )
+        return
+
+    today_iso = date.today().isoformat()
+    old_cache = load_listings()
+    old_by_id = {l["id"]: l for l in (old_cache or {}).get("listings", [])} if old_cache else {}
+
+    seen = load_seen()
+    is_first_run = len(seen) == 0
+    for l in listings:
+        if l["id"] not in seen:
+            seen[l["id"]] = today_iso
+            l["is_new"] = not is_first_run
+        else:
+            l["is_new"] = False
+
+    # объявления, которые были в прошлой выдаче, но пропали из новой — в архив
+    current_ids = {l["id"] for l in listings}
+    archived_ids = set(old_by_id) - current_ids
+    archive_records = []
+    for aid in archived_ids:
+        old = old_by_id[aid]
+        first_seen = seen.pop(aid, old.get("listed_at") or today_iso)
+        try:
+            exposure_days = (date.today() - date.fromisoformat(first_seen[:10])).days
+        except Exception:  # noqa: BLE001
+            exposure_days = None
+        archive_records.append({
+            "id": aid,
+            "address": old.get("address"),
+            "deal": old.get("deal"),
+            "category": old.get("category"),
+            "title": old.get("title"),
+            "area": old.get("area"),
+            "price_usd": old.get("price_usd"),
+            "ppm": old.get("ppm"),
+            "source": old.get("source"),
+            "first_seen": first_seen,
+            "removed_at": today_iso,
+            "exposure_days": exposure_days,
+        })
+    if archive_records:
+        append_archive(archive_records)
+    save_seen(seen)
+
+    cache = save_listings(listings, warnings)
+    append_history_snapshot(_summary_rows(pd.DataFrame(listings)))
+    st.session_state["market_cache"] = cache
 
 
 if st.button("🔄 Обновить объявления (kufar.by + realt.by)", type="primary"):
@@ -82,9 +141,33 @@ for w in cache.get("warnings") or []:
     st.warning(w)
 
 df = pd.DataFrame(cache["listings"])
+if "is_new" not in df.columns:
+    df["is_new"] = False
+df["is_new"] = df["is_new"].fillna(False)
+if "source" not in df.columns:
+    df["source"] = "kufar.by"
 
-DEAL_ORDER = ["Продажа", "Аренда"]
-CATEGORY_ORDER = ["Квартиры и апартаменты", "Торговые помещения", "Офисы", "Другая коммерческая"]
+# ---------------- Общий фильтр ----------------
+with st.expander("🔍 Фильтры", expanded=False):
+    fc1, fc2, fc3 = st.columns(3)
+    deals_present = [d for d in DEAL_ORDER if d in set(df["deal"])]
+    with fc1:
+        sel_deal = st.multiselect("Сделка", deals_present, default=deals_present)
+    categories_present = [c for c in CATEGORY_ORDER if c in set(df["category"])]
+    with fc2:
+        sel_category = st.multiselect("Категория", categories_present, default=categories_present)
+    sources_present = sorted(df["source"].dropna().unique())
+    with fc3:
+        sel_source = st.multiselect("Источник", sources_present, default=sources_present)
+
+if sel_deal:
+    df = df[df["deal"].isin(sel_deal)]
+if sel_category:
+    df = df[df["category"].isin(sel_category)]
+if sel_source:
+    df = df[df["source"].isin(sel_source)]
+
+comments = load_comments()
 
 for addr in MONITORED_ADDRESSES:
     label = addr["label"]
@@ -121,13 +204,15 @@ for addr in MONITORED_ADDRESSES:
     if summary:
         st.dataframe(pd.DataFrame(summary), width="stretch", hide_index=True)
 
-    with st.expander(f"Все объявления — {label} ({len(sub)})"):
+    new_count = int(sub["is_new"].sum())
+    badge = f" · 🆕 новых: {new_count}" if new_count else ""
+    with st.expander(f"Все объявления — {label} ({len(sub)}){badge}"):
         table = sub.copy()
-        table = table.sort_values(["deal", "category", "ppm"])
+        table = table.sort_values(["is_new", "deal", "category", "ppm"], ascending=[False, True, True, True])
         table["Цена"] = table["price_usd"].apply(_fmt_money)
         table["Цена метра"] = table["ppm"].apply(lambda v: _fmt_money(v) if pd.notna(v) else "—")
-        if "source" not in table.columns:
-            table["source"] = "kufar.by"
+        table["Статус"] = table["is_new"].apply(lambda v: "🆕 Новое" if v else "")
+        table["Комментарий"] = table["id"].apply(lambda i: comments.get(i, ""))
         table = table.rename(
             columns={
                 "deal": "Сделка",
@@ -138,13 +223,34 @@ for addr in MONITORED_ADDRESSES:
                 "listed_at": "Размещено",
                 "link": "Ссылка",
             }
-        )[["Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²", "Цена", "Цена метра", "Размещено", "Ссылка"]]
-        st.dataframe(
-            table,
+        )
+        visible_cols = ["Статус", "Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²",
+                         "Цена", "Цена метра", "Размещено", "Ссылка", "Комментарий"]
+        edited = st.data_editor(
+            table[["id", *visible_cols]],
+            key=f"listings_editor_{label}",
             width="stretch",
             hide_index=True,
-            column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
+            column_order=visible_cols,
+            disabled=[c for c in visible_cols if c != "Комментарий"],
+            column_config={
+                "Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть"),
+                "Комментарий": st.column_config.TextColumn("Комментарий", width="medium"),
+            },
         )
+        changed = False
+        for _, row in edited.iterrows():
+            rid = row["id"]
+            new_comment = (row.get("Комментарий") or "").strip()
+            if comments.get(rid, "") != new_comment:
+                if new_comment:
+                    comments[rid] = new_comment
+                else:
+                    comments.pop(rid, None)
+                changed = True
+        if changed:
+            save_comments(comments)
+            st.rerun()
 
 # --- История средней цены метра ---
 history = load_history()
@@ -174,3 +280,36 @@ if len(history) >= 2:
         st.plotly_chart(fig, use_container_width=True)
 else:
     st.caption("📈 График динамики цены метра появится после нескольких обновлений в разные дни.")
+
+# --- Архив: объявления, ушедшие с сайтов ---
+st.divider()
+archive = load_archive()
+with st.expander(f"📦 Архив ушедших объявлений ({len(archive)})"):
+    if not archive:
+        st.caption(
+            "Пока пусто. Как только объявление пропадёт из выдачи при следующем "
+            "обновлении, оно попадёт сюда — с площадью, типом, ценой и сроком экспозиции."
+        )
+    else:
+        adf = pd.DataFrame(archive)
+        adf["Цена"] = adf["price_usd"].apply(_fmt_money)
+        adf["Цена метра"] = adf["ppm"].apply(lambda v: _fmt_money(v) if pd.notna(v) else "—")
+        adf = adf.rename(
+            columns={
+                "address": "Адрес",
+                "deal": "Сделка",
+                "category": "Категория",
+                "title": "Заголовок",
+                "area": "Площадь, м²",
+                "first_seen": "Появилось",
+                "removed_at": "Ушло в архив",
+                "exposure_days": "Срок экспозиции, дней",
+            }
+        )
+        adf = adf.sort_values("Ушло в архив", ascending=False)
+        st.dataframe(
+            adf[["Адрес", "Сделка", "Категория", "Заголовок", "Площадь, м²", "Цена", "Цена метра",
+                 "Появилось", "Ушло в архив", "Срок экспозиции, дней"]],
+            width="stretch",
+            hide_index=True,
+        )
