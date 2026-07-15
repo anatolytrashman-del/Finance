@@ -1,3 +1,4 @@
+import textwrap
 import uuid
 from datetime import date
 
@@ -66,13 +67,16 @@ def _overlay_events(fig, mv, chart_key):
         idx = (mv["date"] - d).abs().idxmin()
         xs.append(mv.loc[idx, "date"])
         ys.append(mv.loc[idx, "value"])
-        texts.append(f"{d:%d.%m.%Y}<br>{ev.get('comment', '')}")
+        # переносим длинный комментарий по словам, чтобы тултип не обрезался
+        wrapped = "<br>".join(textwrap.wrap(ev.get("comment", ""), width=44)) or "—"
+        texts.append(f"<b>{d:%d.%m.%Y}</b><br>{wrapped}")
     if xs:
         fig.add_scatter(
             x=xs, y=ys, mode="markers", name="События",
             marker=dict(symbol="circle", size=12, color="#EF6C00",
                         line=dict(color="white", width=1.5)),
             customdata=texts, hovertemplate="📌 %{customdata}<extra></extra>",
+            hoverlabel=dict(align="left"),
             showlegend=False, cliponaxis=False,
         )
 
