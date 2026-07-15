@@ -56,6 +56,16 @@ def _pw_fetch_json(page, method, url, body=None):
     result = page.evaluate(_FETCH_JS, {"method": method, "url": url, "body": body})
     status, text = result["status"], result["text"]
     if status >= 400:
+        # «too-many-requests» — это не блокировка бота, а временный лимит по
+        # IP (антиспам-фаервол Avito). Распознаём отдельно и даём понятное
+        # сообщение вместо сырого JSON — тут не нужно чинить код, нужно подождать.
+        if "too-many-requests" in text:
+            raise RuntimeError(
+                "Avito временно ограничил доступ с твоего IP (антиспам-фаервол, "
+                "не блокировка бота как таковая). Обычно снимается само через "
+                "какое-то время — от нескольких минут до пары часов. Не пробуй "
+                "обновлять сразу повторно, это может продлить ограничение."
+            )
         raise RuntimeError(f"{method} {url.split('?')[0]} -> HTTP {status}: {text[:200]!r}")
     try:
         return json.loads(text)
@@ -191,6 +201,7 @@ def fetch_all(areas):
             )
             try:
                 page.goto("https://www.avito.ru/", wait_until="domcontentloaded", timeout=30000)
+                time.sleep(2.0)  # даём странице «осесть», как у живого пользователя
             except Exception as exc:  # noqa: BLE001
                 browser.close()
                 return [], [f"avito: не удалось открыть сайт для получения cookies ({exc})"]
