@@ -1,7 +1,6 @@
 from datetime import date
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 from config import MONITORED_ADDRESSES, MONITORED_QUARTALS
@@ -13,7 +12,6 @@ from market_store import (
     append_history_snapshot,
     load_archive,
     load_comments,
-    load_history,
     load_listings,
     load_seen,
     save_comments,
@@ -290,35 +288,6 @@ for quartal in MONITORED_QUARTALS:
         if changed:
             save_comments(comments)
             st.rerun()
-
-# --- История средней цены метра ---
-history = load_history()
-if len(history) >= 2:
-    st.divider()
-    st.subheader("📈 Динамика средней цены метра (продажа)")
-    records = []
-    for snap in history:
-        for row in snap.get("rows", []):
-            if row.get("deal") == "Продажа" and row.get("avg_ppm"):
-                records.append(
-                    {
-                        "Дата": snap["date"],
-                        "Серия": f"{row['address']} · {row['category']}",
-                        "Средняя $/м²": row["avg_ppm"],
-                    }
-                )
-    if records:
-        hist_df = pd.DataFrame(records)
-        fig = px.line(hist_df, x="Дата", y="Средняя $/м²", color="Серия", markers=True)
-        fig.update_layout(
-            xaxis_title=None,
-            legend_title=None,
-            margin=dict(l=10, r=10, t=10, b=10),
-            height=360,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-else:
-    st.caption("📈 График динамики цены метра появится после нескольких обновлений в разные дни.")
 
 # --- Архив: объявления, ушедшие с сайтов ---
 st.divider()
