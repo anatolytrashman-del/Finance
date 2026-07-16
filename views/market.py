@@ -4,10 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from avito_land import fetch_all as fetch_land
-from config import MONITORED_ADDRESSES, MONITORED_LAND_AREAS, MONITORED_QUARTALS
-from land_store import load_listings as load_land_listings
-from land_store import save_listings as save_land_listings
+from config import MONITORED_ADDRESSES, MONITORED_QUARTALS
 from market_kufar import fetch_all as fetch_kufar
 from market_realt import fetch_all as fetch_realt
 from market_realt import verify_links as verify_realt_links
@@ -360,92 +357,3 @@ with st.expander(f"📦 Архив ушедших объявлений ({len(arc
             hide_index=True,
         )
 
-# =========================== Земельные участки (avito.ru) ===========================
-st.divider()
-st.header("🌾 Земельные участки")
-st.caption(
-    "Источник: avito.ru, поиск по нарисованной области на карте · "
-    + " · ".join(a["name"] for a in MONITORED_LAND_AREAS)
-)
-st.caption(
-    "⚠️ Во время обновления на экране откроется настоящее окно браузера "
-    "(так надёжнее проходит антибот-защиту Avito) — не закрывай его, оно "
-    "закроется само."
-)
-
-
-def _fmt_rub(v):
-    if v is None or pd.isna(v):
-        return "—"
-    return f"{v:,.0f} ₽".replace(",", " ")
-
-
-def _refresh_land():
-    with st.spinner("Собираю участки с avito.ru — откроется окно браузера (может занять минуту)..."):
-        listings, warnings = fetch_land(MONITORED_LAND_AREAS)
-    if listings:
-        cache = save_land_listings(listings, warnings)
-        st.session_state["land_cache"] = cache
-    else:
-        st.session_state["land_error"] = (
-            "Не удалось получить объявления. " + "; ".join(warnings) if warnings else
-            "Не удалось получить объявления (пустой ответ)."
-        )
-
-
-if st.button("🔄 Обновить участки с avito.ru", type="primary"):
-    st.session_state.pop("land_error", None)
-    _refresh_land()
-    st.rerun()
-
-if st.session_state.get("land_error"):
-    st.error(st.session_state["land_error"])
-
-land_cache = st.session_state.get("land_cache") or load_land_listings()
-
-if not land_cache or not land_cache.get("listings"):
-    st.info("Участки ещё не загружались. Нажми «Обновить участки с avito.ru» выше.")
-else:
-    st.caption(f"Обновлено: {land_cache['fetched_at']} · участков: {len(land_cache['listings'])}")
-    for w in land_cache.get("warnings") or []:
-        st.warning(w)
-
-    land_df = pd.DataFrame(land_cache["listings"])
-    for land_area in MONITORED_LAND_AREAS:
-        area_name = land_area["name"]
-        land_sub = land_df[land_df["area_name"] == area_name] if "area_name" in land_df.columns else land_df
-        st.subheader(f"📍 {area_name}")
-        if land_sub.empty:
-            st.caption("Участков не найдено.")
-            continue
-
-        ppm_land = land_sub["price_per_sotka"].dropna()
-        lm1, lm2, lm3, lm4 = st.columns(4)
-        lm1.metric("Участков", len(land_sub))
-        lm2.metric("Средняя цена за сотку", _fmt_rub(ppm_land.mean()) if len(ppm_land) else "—")
-        lm3.metric("Медиана", _fmt_rub(ppm_land.median()) if len(ppm_land) else "—")
-        lm4.metric(
-            "Диапазон",
-            f"{_fmt_rub(ppm_land.min())} – {_fmt_rub(ppm_land.max())}" if len(ppm_land) else "—",
-        )
-
-        land_table = land_sub.copy().sort_values("price_per_sotka")
-        land_table["Цена"] = land_table["price_rub"].apply(_fmt_rub)
-        land_table["Цена за сотку"] = land_table["price_per_sotka"].apply(
-            lambda v: _fmt_rub(v) if pd.notna(v) else "—"
-        )
-        land_table = land_table.rename(
-            columns={
-                "title": "Заголовок",
-                "land_type": "Тип земли",
-                "area_sotok": "Площадь, сот",
-                "address": "Адрес",
-                "link": "Ссылка",
-            }
-        )
-        st.dataframe(
-            land_table[["Заголовок", "Тип земли", "Площадь, сот", "Цена", "Цена за сотку", "Адрес", "Ссылка"]],
-            width="stretch",
-            hide_index=True,
-            column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
-        )
