@@ -178,8 +178,32 @@ def _fetch_area(page, area_config):
     return listings, []
 
 
-def fetch_all(areas):
-    """Собирает объявления по всем настроенным областям через headless-браузер."""
+# Скрываем самый распространённый признак автоматизации — navigator.webdriver
+# (в обычном Chrome его нет, headless/Playwright по умолчанию его выставляет).
+_STEALTH_INIT_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+"""
+
+
+def _launch_browser(p, headless):
+    """Пробуем запустить настоящий установленный Chrome (channel='chrome') —
+    он неотличим от браузера обычного пользователя, в отличие от бандла
+    Playwright, который некоторые антибот-системы умеют узнавать по сборке.
+    Если Chrome не установлен — используем чистый Chromium как запасной."""
+    try:
+        return p.chromium.launch(channel="chrome", headless=headless)
+    except Exception:  # noqa: BLE001
+        return p.chromium.launch(headless=headless)
+
+
+def fetch_all(areas, headless=False):
+    """Собирает объявления по всем настроенным областям через настоящий браузер.
+
+    headless=False по умолчанию: у разведчика (avito_scout.py) именно видимый
+    браузер прошёл без единой блокировки, а headless-режим при живом прогоне
+    словил «too-many-requests» — похоже, антибот отличает headless по тонким
+    техническим признакам, а не считает буквально количество запросов.
+    На экране на время обновления появится окно браузера — это ожидаемо."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -191,7 +215,7 @@ def fetch_all(areas):
     all_listings, all_warnings = [], []
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = _launch_browser(p, headless)
             page = browser.new_page(
                 viewport={"width": 1440, "height": 1000},
                 user_agent=(
@@ -199,6 +223,7 @@ def fetch_all(areas):
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
                 ),
             )
+            page.add_init_script(_STEALTH_INIT_JS)
             try:
                 page.goto("https://www.avito.ru/", wait_until="domcontentloaded", timeout=30000)
                 time.sleep(2.0)  # даём странице «осесть», как у живого пользователя

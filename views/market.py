@@ -367,6 +367,11 @@ st.caption(
     "Источник: avito.ru, поиск по нарисованной области на карте · "
     + " · ".join(a["name"] for a in MONITORED_LAND_AREAS)
 )
+st.caption(
+    "⚠️ Во время обновления на экране откроется настоящее окно браузера "
+    "(так надёжнее проходит антибот-защиту Avito) — не закрывай его, оно "
+    "закроется само."
+)
 
 
 def _fmt_rub(v):
@@ -376,7 +381,7 @@ def _fmt_rub(v):
 
 
 def _refresh_land():
-    with st.spinner("Собираю участки с avito.ru через браузер (может занять минуту)..."):
+    with st.spinner("Собираю участки с avito.ru — откроется окно браузера (может занять минуту)..."):
         listings, warnings = fetch_land(MONITORED_LAND_AREAS)
     if listings:
         cache = save_land_listings(listings, warnings)
