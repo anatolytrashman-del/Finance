@@ -3,8 +3,12 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from bir_store import append_archive as append_bir_archive
+from bir_store import load_archive as load_bir_archive
 from bir_store import load_listings as load_bir_listings
+from bir_store import load_seen as load_bir_seen
 from bir_store import save_listings as save_bir_listings
+from bir_store import save_seen as save_bir_seen
 from config import MONITORED_ADDRESSES, MONITORED_QUARTALS
 from market_bir import HOUSES as BIR_HOUSES
 from market_bir import fetch_all as fetch_bir
@@ -48,17 +52,63 @@ for _quartal, _house, _url in BIR_HOUSES:
     BIR_QUARTALS.setdefault(_quartal, []).append(_house)
 
 
+def _bir_archive_entry(item, reason, first_seen, today_iso):
+    try:
+        exposure_days = (date.today() - date.fromisoformat(first_seen[:10])).days
+    except Exception:  # noqa: BLE001
+        exposure_days = None
+    return {
+        "id": item.get("id"),
+        "quartal": item.get("quartal"),
+        "house": item.get("house"),
+        "category": item.get("category"),
+        "unit": item.get("unit"),
+        "area": item.get("area"),
+        "price_eur": item.get("price_eur"),
+        "reason": reason,
+        "first_seen": first_seen,
+        "removed_at": today_iso,
+        "exposure_days": exposure_days,
+    }
+
+
 def _refresh_bir():
     with st.spinner("Собираю цены с bir.by — обход всех домов может занять пару минут..."):
         listings, warnings = fetch_bir()
-    if listings:
-        cache = save_bir_listings(listings, warnings)
-        st.session_state["bir_cache"] = cache
-    else:
+    if not listings:
         st.session_state["bir_error"] = (
             "Не удалось получить цены. " + "; ".join(warnings) if warnings else
             "Не удалось получить цены (пустой ответ)."
         )
+        return
+
+    today_iso = date.today().isoformat()
+    old_cache = load_bir_listings()
+    old_by_id = {l["id"]: l for l in (old_cache or {}).get("listings", [])} if old_cache else {}
+    seen = load_bir_seen()
+
+    is_first_run = len(seen) == 0
+    for l in listings:
+        if l["id"] not in seen:
+            seen[l["id"]] = today_iso
+            l["is_new"] = not is_first_run
+        else:
+            l["is_new"] = False
+
+    # юниты, которые были в прошлой выдаче, но пропали из новой — проданы/сняты с продажи
+    current_ids = {l["id"] for l in listings}
+    archived_ids = set(old_by_id) - current_ids
+    archive_records = []
+    for aid in archived_ids:
+        old = old_by_id[aid]
+        first_seen = seen.pop(aid, today_iso)
+        archive_records.append(_bir_archive_entry(old, "Ушло с сайта", first_seen, today_iso))
+    if archive_records:
+        append_bir_archive(archive_records)
+    save_bir_seen(seen)
+
+    cache = save_bir_listings(listings, warnings)
+    st.session_state["bir_cache"] = cache
 
 
 if st.button("🔄 Обновить цены (bir.by)", type="primary"):
@@ -79,38 +129,60 @@ else:
         st.warning(w)
 
     bir_df = pd.DataFrame(bir_cache["listings"])
-    for quartal, houses in BIR_QUARTALS.items():
+    if "is_new" not in bir_df.columns:
+        bir_df["is_new"] = False
+    bir_df["is_new"] = bir_df["is_new"].fillna(False)
+
+    with st.expander("🔍 Фильтры (bir.by)", expanded=False):
+        bfc1, bfc2 = st.columns(2)
+        quartals_present = [q for q in BIR_QUARTALS if q in set(bir_df["quartal"])]
+        with bfc1:
+            bir_sel_quartal = st.multiselect("Квартал", quartals_present, default=quartals_present)
+        categories_present = [c for c in BIR_CATEGORY_ORDER if c in set(bir_df["category"])]
+        with bfc2:
+            bir_sel_category = st.multiselect("Категория", categories_present, default=categories_present)
+
+    if bir_sel_quartal:
+        bir_df = bir_df[bir_df["quartal"].isin(bir_sel_quartal)]
+    if bir_sel_category:
+        bir_df = bir_df[bir_df["category"].isin(bir_sel_category)]
+
+    # Дома внутри квартала сведены в одну цифру — застройщика интересует
+    # цена по кварталу в целом, не по конкретному корпусу (кладовые вдобавок
+    # общие на несколько домов, так что дом для них всё равно не показателен).
+    for quartal in BIR_QUARTALS:
         st.subheader(f"🏠 {quartal}")
-        q_df = bir_df[bir_df["house"].isin(houses)]
+        q_df = bir_df[bir_df["quartal"] == quartal]
         if q_df.empty:
             st.caption("Юнитов не найдено.")
             continue
 
         summary = []
-        for house in houses:
-            for category in BIR_CATEGORY_ORDER:
-                g = q_df[(q_df["house"] == house) & (q_df["category"] == category)]
-                if g.empty:
-                    continue
-                price = g["price_eur"].dropna()
-                summary.append(
-                    {
-                        "Дом": house,
-                        "Категория": category,
-                        "Юнитов": len(g),
-                        "Средняя цена": _fmt_eur(price.mean()) if len(price) else "—",
-                        "Мин": _fmt_eur(price.min()) if len(price) else "—",
-                        "Макс": _fmt_eur(price.max()) if len(price) else "—",
-                    }
-                )
+        for category in BIR_CATEGORY_ORDER:
+            g = q_df[q_df["category"] == category]
+            if g.empty:
+                continue
+            price = g["price_eur"].dropna()
+            summary.append(
+                {
+                    "Категория": category,
+                    "Юнитов": len(g),
+                    "Средняя цена": _fmt_eur(price.mean()) if len(price) else "—",
+                    "Мин": _fmt_eur(price.min()) if len(price) else "—",
+                    "Макс": _fmt_eur(price.max()) if len(price) else "—",
+                }
+            )
         if summary:
             st.dataframe(pd.DataFrame(summary), width="stretch", hide_index=True)
 
-        with st.expander(f"Все юниты — {quartal} ({len(q_df)})"):
-            table = q_df.copy().sort_values(["house", "category", "price_eur"])
+        new_count = int(q_df["is_new"].sum())
+        badge = f" · 🆕 новых: {new_count}" if new_count else ""
+        with st.expander(f"Все юниты — {quartal} ({len(q_df)}){badge}"):
+            table = q_df.copy().sort_values(["is_new", "category", "price_eur"], ascending=[False, True, True])
             table["Цена"] = table["price_eur"].apply(_fmt_eur)
             table["Цена за м²"] = table["ppm_eur"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
             table["Цена (быстрая оплата)"] = table["price_eur_fast"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
+            table["Статус"] = table["is_new"].apply(lambda v: "🆕 Новое" if v else "")
             table = table.rename(
                 columns={
                     "house": "Дом",
@@ -123,13 +195,44 @@ else:
                     "link": "Ссылка",
                 }
             )
-            visible_cols = ["Дом", "Категория", "№ помещения", "Этаж", "Подъезд", "Площадь, м²",
+            visible_cols = ["Статус", "Дом", "Категория", "№ помещения", "Этаж", "Подъезд", "Площадь, м²",
                              "Комнат", "Цена", "Цена за м²", "Цена (быстрая оплата)", "Ссылка"]
             st.dataframe(
                 table[visible_cols],
                 width="stretch",
                 hide_index=True,
                 column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
+            )
+
+    bir_archive = load_bir_archive()
+    with st.expander(f"📦 Архив ушедших юнитов bir.by ({len(bir_archive)})"):
+        if not bir_archive:
+            st.caption(
+                "Пока пусто. Как только юнит пропадёт из выдачи при следующем "
+                "обновлении (продан или снят с продажи), он попадёт сюда."
+            )
+        else:
+            badf = pd.DataFrame(bir_archive)
+            badf["Цена"] = badf["price_eur"].apply(_fmt_eur)
+            badf = badf.rename(
+                columns={
+                    "quartal": "Квартал",
+                    "house": "Дом",
+                    "category": "Категория",
+                    "unit": "№ помещения",
+                    "area": "Площадь, м²",
+                    "reason": "Причина",
+                    "first_seen": "Появилось",
+                    "removed_at": "Ушло в архив",
+                    "exposure_days": "Срок экспозиции, дней",
+                }
+            )
+            badf = badf.sort_values("Ушло в архив", ascending=False)
+            st.dataframe(
+                badf[["Квартал", "Дом", "Категория", "№ помещения", "Площадь, м²", "Цена",
+                      "Причина", "Появилось", "Ушло в архив", "Срок экспозиции, дней"]],
+                width="stretch",
+                hide_index=True,
             )
 
 st.divider()
