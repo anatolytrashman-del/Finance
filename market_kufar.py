@@ -32,15 +32,23 @@ def _param_map(ad):
 
 
 def _category_label(ad, params):
-    """Категория для сводки. None — категория нам не интересна."""
+    """Категория для сводки. None — категория нам не интересна.
+
+    Машиноместа/гаражи (re.kufar.by/l/minsk/kupit/garazh) — отдельная
+    категория на kufar с неизвестным нам числовым кодом (в отличие от
+    квартир/коммерции, где код проверен). Поэтому здесь не сверяем cat с
+    константой, а ловим по тексту property_type — тем же способом, каким
+    уже отличаются офис/торговое внутри коммерции ниже."""
     cat = str(ad.get("category") or "")
+    label = str((params.get("property_type") or {}).get("vl") or "").lower()
+    if "гараж" in label or "машино-место" in label or "машиноместо" in label:
+        return "Машиноместа"
     if cat == CATEGORY_FLATS:
         return "Квартиры и апартаменты"
     if cat == CATEGORY_COMMERCIAL:
-        label = str((params.get("property_type") or {}).get("vl") or "")
-        if "офис" in label.lower():
+        if "офис" in label:
             return "Офисы"
-        if "торгов" in label.lower() or "магазин" in label.lower():
+        if "торгов" in label or "магазин" in label:
             return "Торговые помещения"
         return "Другая коммерческая"
     return None
