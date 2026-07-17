@@ -146,8 +146,12 @@ def main():
                 captured_this_page.clear()
                 print(f"[{n}/{total}] {house_label} · {sort_label} -> {url}")
                 try:
-                    page.goto(url, wait_until="networkidle", timeout=30000)
-                    page.wait_for_timeout(1500)
+                    # networkidle тут никогда не срабатывает (похоже, сайт
+                    # постоянно шлёт фоновые запросы — чат-виджет/аналитика),
+                    # поэтому ждём только загрузку DOM и добавляем свою паузу
+                    # на дорисовку таблицы юнитов.
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(3500)
                     html = page.content()
                 except Exception as exc:  # noqa: BLE001
                     line = f"  ОШИБКА: {exc}"
