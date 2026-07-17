@@ -81,8 +81,21 @@ def monthly_view(df):
     return df[keep].reset_index(drop=True)
 
 
+def _fmt_point_usd(v):
+    sign = "-" if v < 0 else ""
+    return f"{sign}${abs(v):,.0f}".replace(",", " ")
+
+
 def _overlay_events(fig, mv, chart_key):
-    """Ставит маркеры-звёздочки событий на линию (привязка к ближайшему замеру).
+    """Ставит маркеры-точки событий на линию (привязка к ближайшему замеру).
+
+    Несколько событий, попавших на одну и ту же точку графика (например,
+    два события через день — оба ближе всего к одному и тому же месячному
+    замеру), объединяются в ОДИН маркер с одним всплывающим окном — иначе
+    точки рисуются друг на друге и наведение показывает только верхнюю
+    (тот же приём, что группировка объектов в одном доме на карте
+    в real_estate.py). В тултипе показывается и значение графика в этой
+    точке, не только текст события.
 
     События вне диапазона ряда (± ~месяц) пропускаются."""
     events = st.session_state.get("events") or []
@@ -91,7 +104,8 @@ def _overlay_events(fig, mv, chart_key):
     mv = mv.sort_values("date").reset_index(drop=True)
     lo = mv["date"].min() - pd.Timedelta(days=31)
     hi = mv["date"].max() + pd.Timedelta(days=31)
-    xs, ys, texts = [], [], []
+
+    groups = {}  # idx ближайшей точки -> список (дата события, комментарий)
     for ev in events:
         if chart_key not in (ev.get("charts") or []):
             continue
@@ -102,11 +116,21 @@ def _overlay_events(fig, mv, chart_key):
         if d < lo or d > hi:
             continue
         idx = (mv["date"] - d).abs().idxmin()
-        xs.append(mv.loc[idx, "date"])
-        ys.append(mv.loc[idx, "value"])
-        # переносим длинный комментарий по словам, чтобы тултип не обрезался
-        wrapped = "<br>".join(textwrap.wrap(ev.get("comment", ""), width=44)) or "—"
-        texts.append(f"<b>{d:%d.%m.%Y}</b><br>{wrapped}")
+        groups.setdefault(idx, []).append((d, ev.get("comment", "")))
+
+    xs, ys, texts = [], [], []
+    for idx, items in groups.items():
+        items.sort(key=lambda it: it[0])
+        point_date, point_value = mv.loc[idx, "date"], mv.loc[idx, "value"]
+        header = f"<b>{point_date:%d.%m.%Y} · {_fmt_point_usd(point_value)}</b>"
+        blocks = []
+        for d, comment in items:
+            # переносим длинный комментарий по словам, чтобы тултип не обрезался
+            wrapped = "<br>".join(textwrap.wrap(comment, width=44)) or "—"
+            blocks.append(f"<i>{d:%d.%m.%Y}</i><br>{wrapped}")
+        texts.append(header + "<br><br>" + "<br><br>".join(blocks))
+        xs.append(point_date)
+        ys.append(point_value)
     if xs:
         fig.add_scatter(
             x=xs, y=ys, mode="markers", name="События",
