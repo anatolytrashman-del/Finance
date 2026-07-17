@@ -6,8 +6,10 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from data_source import load_asset_allocation, load_progress, sidebar_refresh_control
+from balance_live import recalc_live_totals
+from data_source import load_asset_allocation, load_balance, load_progress, sidebar_refresh_control
 from events_store import load_events, save_events
+from rates_store import load_rates as load_bnb_rates
 from rates_widget import render_sidebar_rates
 
 sidebar_refresh_control()
@@ -33,6 +35,39 @@ if data is None:
 capital_usd = data.get("capital_usd", pd.DataFrame())
 capital_rub = data.get("capital_rub", pd.DataFrame())
 debt = data.get("debt", pd.DataFrame())
+
+
+def _override_latest(df, live_value):
+    """Возвращает копию df с последней по дате точкой, заменённой на
+    live_value. История (все точки до неё) не трогается, и ничего не
+    пишется обратно в Google-таблицу — подмена только для показа."""
+    if df is None or df.empty or live_value is None:
+        return df
+    df = df.sort_values("date").reset_index(drop=True).copy()
+    df.loc[df.index[-1], "value"] = live_value
+    return df
+
+
+# --- «Сегодня» по факту: последняя точка капитала и долга пересчитывается по
+# текущему курсу bnb.by (см. balance_live.py) — вся история на графиках и
+# сама Google-таблица остаются нетронутыми.
+rates_cache = load_bnb_rates()
+live_rates = rates_cache["rates"] if rates_cache else None
+grand_total_live, obligations_total_live = recalc_live_totals(load_balance(), live_rates)
+
+capital_usd = _override_latest(capital_usd, grand_total_live)
+debt = _override_latest(debt, obligations_total_live)
+
+if grand_total_live is not None:
+    st.caption(
+        f"💱 Последняя точка «Капитал, $» и «Долговая нагрузка» пересчитана по курсу "
+        f"bnb.by на {rates_cache['fetched_at']} — история на графиках не меняется."
+    )
+else:
+    st.caption(
+        "💡 Курс bnb.by ещё не обновлялся — «сегодня» показано по цифрам из таблицы. "
+        "Обнови курс в сайдбаре, чтобы включить пересчёт."
+    )
 
 
 def monthly_view(df):
