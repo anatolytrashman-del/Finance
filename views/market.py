@@ -3,7 +3,11 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from bir_store import load_listings as load_bir_listings
+from bir_store import save_listings as save_bir_listings
 from config import MONITORED_ADDRESSES, MONITORED_QUARTALS
+from market_bir import HOUSES as BIR_HOUSES
+from market_bir import fetch_all as fetch_bir
 from market_kufar import fetch_all as fetch_kufar
 from market_realt import fetch_all as fetch_realt
 from market_realt import verify_links as verify_realt_links
@@ -21,6 +25,114 @@ from market_store import (
 
 st.title("🏷️ Анализ рынка")
 st.caption("Источники: kufar.by, realt.by · " + " · ".join(q["name"] for q in MONITORED_QUARTALS))
+
+# =========================== Цены застройщика (bir.by) ===========================
+# Независимый раздел — рендерится до st.stop() ниже по вторичке kufar/realt,
+# иначе был бы не виден, пока не обновлены объявления с kufar/realt.
+st.header("🏗️ Цены застройщика (bir.by)")
+st.caption(
+    "Прайс-лист самого застройщика ЖК «Минск Мир» по 16 и 11 кварталу — "
+    "не «вторичка», как выше, а первичные цены по каждому дому."
+)
+
+
+def _fmt_eur(v):
+    if v is None or pd.isna(v):
+        return "—"
+    return f"€{v:,.0f}".replace(",", " ")
+
+
+BIR_CATEGORY_ORDER = ["Квартиры и апартаменты", "Коммерческие помещения", "Кладовые", "Машиноместа"]
+BIR_QUARTALS = {}
+for _quartal, _house, _url in BIR_HOUSES:
+    BIR_QUARTALS.setdefault(_quartal, []).append(_house)
+
+
+def _refresh_bir():
+    with st.spinner("Собираю цены с bir.by — обход всех домов может занять пару минут..."):
+        listings, warnings = fetch_bir()
+    if listings:
+        cache = save_bir_listings(listings, warnings)
+        st.session_state["bir_cache"] = cache
+    else:
+        st.session_state["bir_error"] = (
+            "Не удалось получить цены. " + "; ".join(warnings) if warnings else
+            "Не удалось получить цены (пустой ответ)."
+        )
+
+
+if st.button("🔄 Обновить цены (bir.by)", type="primary"):
+    st.session_state.pop("bir_error", None)
+    _refresh_bir()
+    st.rerun()
+
+if st.session_state.get("bir_error"):
+    st.error(st.session_state["bir_error"])
+
+bir_cache = st.session_state.get("bir_cache") or load_bir_listings()
+
+if not bir_cache or not bir_cache.get("listings"):
+    st.info("Цены ещё не загружались. Нажми «Обновить цены (bir.by)» выше.")
+else:
+    st.caption(f"Обновлено: {bir_cache['fetched_at']} · юнитов: {len(bir_cache['listings'])}")
+    for w in bir_cache.get("warnings") or []:
+        st.warning(w)
+
+    bir_df = pd.DataFrame(bir_cache["listings"])
+    for quartal, houses in BIR_QUARTALS.items():
+        st.subheader(f"🏠 {quartal}")
+        q_df = bir_df[bir_df["house"].isin(houses)]
+        if q_df.empty:
+            st.caption("Юнитов не найдено.")
+            continue
+
+        summary = []
+        for house in houses:
+            for category in BIR_CATEGORY_ORDER:
+                g = q_df[(q_df["house"] == house) & (q_df["category"] == category)]
+                if g.empty:
+                    continue
+                price = g["price_eur"].dropna()
+                summary.append(
+                    {
+                        "Дом": house,
+                        "Категория": category,
+                        "Юнитов": len(g),
+                        "Средняя цена": _fmt_eur(price.mean()) if len(price) else "—",
+                        "Мин": _fmt_eur(price.min()) if len(price) else "—",
+                        "Макс": _fmt_eur(price.max()) if len(price) else "—",
+                    }
+                )
+        if summary:
+            st.dataframe(pd.DataFrame(summary), width="stretch", hide_index=True)
+
+        with st.expander(f"Все юниты — {quartal} ({len(q_df)})"):
+            table = q_df.copy().sort_values(["house", "category", "price_eur"])
+            table["Цена"] = table["price_eur"].apply(_fmt_eur)
+            table["Цена за м²"] = table["ppm_eur"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
+            table["Цена (быстрая оплата)"] = table["price_eur_fast"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
+            table = table.rename(
+                columns={
+                    "house": "Дом",
+                    "category": "Категория",
+                    "unit": "№ помещения",
+                    "floor": "Этаж",
+                    "entrance": "Подъезд",
+                    "area": "Площадь, м²",
+                    "rooms": "Комнат",
+                    "link": "Ссылка",
+                }
+            )
+            visible_cols = ["Дом", "Категория", "№ помещения", "Этаж", "Подъезд", "Площадь, м²",
+                             "Комнат", "Цена", "Цена за м²", "Цена (быстрая оплата)", "Ссылка"]
+            st.dataframe(
+                table[visible_cols],
+                width="stretch",
+                hide_index=True,
+                column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
+            )
+
+st.divider()
 
 DEAL_ORDER = ["Продажа", "Аренда"]
 CATEGORY_ORDER = ["Квартиры и апартаменты", "Торговые помещения", "Офисы", "Другая коммерческая", "Машиноместа"]
