@@ -213,10 +213,12 @@ def _expand_all(page):
 
 
 def _launch_browser(p, headless):
-    try:
-        return p.chromium.launch(channel="chrome", headless=headless)
-    except Exception:  # noqa: BLE001
-        return p.chromium.launch(headless=headless)
+    # Без channel="chrome" — тот вариант ловил ERR_NAME_NOT_RESOLVED на
+    # bir.by (похоже, у установленного Chrome другие настройки DNS/сети под
+    # автоматизацией). Обычный бандловый Chromium уже проверен вживую в
+    # bir_scout.py — там ровно так и запускается, и все 32 страницы
+    # загрузились без единой ошибки.
+    return p.chromium.launch(headless=headless)
 
 
 def fetch_house(quartal, house, base_url, page):
