@@ -81,9 +81,19 @@ def monthly_view(df):
     return df[keep].reset_index(drop=True)
 
 
-def _fmt_point_usd(v):
+def _fmt_point_value(v, unit="USD"):
+    """Человеко-читаемое значение точки для тултипа графика — вместо сырого
+    plotly-формата ('date=May 1, 2024', 'value=120')."""
+    if v is None or pd.isna(v):
+        return "—"
     sign = "-" if v < 0 else ""
-    return f"{sign}${abs(v):,.0f}".replace(",", " ")
+    if unit == "USD":
+        return f"{sign}${abs(v):,.0f}".replace(",", " ")
+    if unit == "RUB":
+        return f"{sign}{abs(v):,.0f} ₽".replace(",", " ")
+    if unit == "%":
+        return f"{v:.1f}%"
+    return f"{sign}{abs(v):,.0f} {unit}".replace(",", " ")
 
 
 def _overlay_events(fig, mv, chart_key):
@@ -122,7 +132,7 @@ def _overlay_events(fig, mv, chart_key):
     for idx, items in groups.items():
         items.sort(key=lambda it: it[0])
         point_date, point_value = mv.loc[idx, "date"], mv.loc[idx, "value"]
-        header = f"<b>{point_date:%d.%m.%Y} · {_fmt_point_usd(point_value)}</b>"
+        header = f"<b>{point_date:%d.%m.%Y} · {_fmt_point_value(point_value, 'USD')}</b>"
         blocks = []
         for d, comment in items:
             # переносим длинный комментарий по словам, чтобы тултип не обрезался
@@ -148,7 +158,11 @@ def line_chart(df, y_label, color, chart_key=None):
         return
     df = monthly_view(df)
     fig = px.line(df, x="date", y="value", markers=True)
-    fig.update_traces(line_color=color)
+    fig.update_traces(
+        line_color=color,
+        customdata=df["value"].apply(lambda v: _fmt_point_value(v, y_label)),
+        hovertemplate="<b>%{x|%d.%m.%Y}</b><br>%{customdata}<extra></extra>",
+    )
     if chart_key:
         _overlay_events(fig, df, chart_key)
     fig.update_layout(
@@ -310,7 +324,9 @@ with col3:
         else:
             fig = px.bar(yearly, x="Год", y="Прирост")
             fig.update_traces(
-                marker_color=["#2E7D32" if v >= 0 else "#C62828" for v in yearly["Прирост"]]
+                marker_color=["#2E7D32" if v >= 0 else "#C62828" for v in yearly["Прирост"]],
+                customdata=yearly["Прирост"].apply(lambda v: _fmt_point_value(v, "USD")),
+                hovertemplate="<b>%{x}</b><br>%{customdata}<extra></extra>",
             )
             fig.update_xaxes(type="category")
             fig.update_layout(
@@ -335,7 +351,11 @@ with col4:
         else:
             merged["leverage"] = -merged["value_debt"] / merged["value_cap"] * 100
             fig = px.line(merged, x="date", y="leverage", markers=True)
-            fig.update_traces(line_color="#EF6C00")
+            fig.update_traces(
+                line_color="#EF6C00",
+                customdata=merged["leverage"].apply(lambda v: _fmt_point_value(v, "%")),
+                hovertemplate="<b>%{x|%d.%m.%Y}</b><br>%{customdata}<extra></extra>",
+            )
             fig.update_layout(
                 xaxis_title=None,
                 yaxis_title="%",
@@ -358,6 +378,10 @@ with col6:
         st.warning("Не нашёл помесячный срез с разбивкой по активам.")
     else:
         fig = px.pie(allocation, names="Категория", values="Сумма", hole=0.4)
+        fig.update_traces(
+            customdata=allocation["Сумма"].apply(lambda v: _fmt_point_value(v, "USD")),
+            hovertemplate="<b>%{label}</b><br>%{customdata} · %{percent}<extra></extra>",
+        )
         fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320)
         st.plotly_chart(fig, use_container_width=True)
 
