@@ -6,9 +6,11 @@ import streamlit as st
 
 from data_source import load_real_estate, sidebar_refresh_control
 from docs_store import load_documents, save_documents
+from rates_widget import render_sidebar_rates
 from sale_finmodel import object_choices
 
 sidebar_refresh_control()
+render_sidebar_rates()
 
 st.title("🗂️ Архив документов")
 st.caption("Файлы храним на Google Диске, сюда вставляем ссылку. Блок — на каждый объект недвижимости.")

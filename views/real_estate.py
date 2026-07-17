@@ -7,8 +7,10 @@ import streamlit as st
 from config import YANDEX_MAPS_API_KEY
 from data_source import load_real_estate, load_real_estate_sold, sidebar_refresh_control
 from parsers import parse_area, parse_money
+from rates_widget import render_sidebar_rates
 
 sidebar_refresh_control()
+render_sidebar_rates()
 
 st.title("🏠 Портфолио объектов недвижимости")
 

@@ -2,8 +2,10 @@ import pandas as pd
 import streamlit as st
 
 from data_source import load_deals, sidebar_refresh_control
+from rates_widget import render_sidebar_rates
 
 sidebar_refresh_control()
+render_sidebar_rates()
 
 st.title("📈 Реестр сделок")
 

@@ -8,8 +8,10 @@ import streamlit as st
 
 from data_source import load_asset_allocation, load_progress, sidebar_refresh_control
 from events_store import load_events, save_events
+from rates_widget import render_sidebar_rates
 
 sidebar_refresh_control()
+render_sidebar_rates()
 
 st.title("📊 Дашборд капитала")
 

@@ -15,6 +15,7 @@ from finmodel_store import (
     save_finmodels,
     save_sale_finmodels,
 )
+from rates_widget import render_sidebar_rates
 from sale_finmodel import (
     SALE_TAX_BASES,
     compute_sale,
@@ -23,6 +24,7 @@ from sale_finmodel import (
 )
 
 sidebar_refresh_control()
+render_sidebar_rates()
 
 st.title("🧮 Финмодель")
 st.header("🏠 Аренда")
