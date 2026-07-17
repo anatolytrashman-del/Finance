@@ -6,16 +6,13 @@ st.set_page_config(page_title="Trashman Family Office", page_icon="📊", layout
 # отрисовке каждой страницы (перед nav.run()), поэтому вставка здесь применяет
 # шрифт ко всем страницам сразу. Google Fonts сам отдаёт и латиницу, и кириллицу
 # (весь интерфейс на русском), подставляя нужный поднабор по unicode-range.
-#
-# Универсальный селектор * — намеренно, не точечные классы: у части элементов
-# Streamlit (например, крупные числа в st.metric) свой внутренний класс, не
-# попадающий под обычные селекторы вроде [class*="css"] — точечный список
-# каждый раз оставлял дыры. * + !important перекрывает вообще всё разом.
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
-    *, *::before, *::after {
+    html, body, [class*="css"], .stApp,
+    button, input, optgroup, select, textarea,
+    h1, h2, h3, h4, h5, h6 {
         font-family: 'Montserrat', sans-serif !important;
     }
     </style>
