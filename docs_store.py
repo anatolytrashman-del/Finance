@@ -4,9 +4,10 @@
 Сами файлы лежат на Google Диске — тут храним только ссылки и метаданные.
 Документ: {id, object, object_label, type, date, number, amount, summary, link}."""
 import json
-from pathlib import Path
 
-DOCS_PATH = Path.home() / ".trashman_family_office" / "documents.json"
+from local_store import APP_DATA_DIR
+
+DOCS_PATH = APP_DATA_DIR / "documents.json"
 
 
 def load_documents():

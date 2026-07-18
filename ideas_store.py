@@ -3,9 +3,10 @@
 Хранится вне папки проекта, чтобы идеи не терялись при обновлении кода
 (скачивании свежего архива и замене папки)."""
 import json
-from pathlib import Path
 
-IDEAS_PATH = Path.home() / ".trashman_family_office" / "invest_ideas.json"
+from local_store import APP_DATA_DIR
+
+IDEAS_PATH = APP_DATA_DIR / "invest_ideas.json"
 
 
 def load_ideas():

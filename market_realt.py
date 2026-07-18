@@ -26,16 +26,15 @@ import time
 
 import requests
 
+from web_common import DESKTOP_USER_AGENT
+
 ENDPOINT = "https://realt.by/bff/graphql"
 HEADERS = {
     "Content-Type": "application/json",
     "Accept": "*/*",
     "Origin": "https://realt.by",
     "Referer": "https://realt.by/sale/flats/",
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": DESKTOP_USER_AGENT,
     "apollographql-client-name": "realt-web",
 }
 

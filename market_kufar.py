@@ -11,12 +11,11 @@ import time
 
 import requests
 
+from web_common import DESKTOP_USER_AGENT
+
 API_URL = "https://api.kufar.by/search-api/v2/search/rendered-paginated"
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": DESKTOP_USER_AGENT,
     "Accept": "application/json",
     "Accept-Language": "ru-RU,ru;q=0.9",
 }

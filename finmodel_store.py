@@ -2,11 +2,12 @@
 
 Хранится вне папки проекта, чтобы модели не терялись при обновлении кода."""
 import json
-from pathlib import Path
 
-FINMODELS_PATH = Path.home() / ".trashman_family_office" / "finmodels.json"
-SALE_FINMODELS_PATH = Path.home() / ".trashman_family_office" / "sale_finmodels.json"
-BUYRENT_FINMODELS_PATH = Path.home() / ".trashman_family_office" / "buyrent_finmodels.json"
+from local_store import APP_DATA_DIR
+
+FINMODELS_PATH = APP_DATA_DIR / "finmodels.json"
+SALE_FINMODELS_PATH = APP_DATA_DIR / "sale_finmodels.json"
+BUYRENT_FINMODELS_PATH = APP_DATA_DIR / "buyrent_finmodels.json"
 
 
 def _load(path):

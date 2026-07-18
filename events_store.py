@@ -3,9 +3,10 @@
 Хранится вне папки проекта (в домашней директории), чтобы события не терялись
 при обновлении кода. Каждое событие: {id, date, comment, charts:[ключи графиков]}."""
 import json
-from pathlib import Path
 
-EVENTS_PATH = Path.home() / ".trashman_family_office" / "events.json"
+from local_store import APP_DATA_DIR
+
+EVENTS_PATH = APP_DATA_DIR / "events.json"
 
 
 def load_events():

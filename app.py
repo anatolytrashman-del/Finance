@@ -6,10 +6,17 @@ st.set_page_config(page_title="Trashman Family Office", page_icon="📊", layout
 # отрисовке каждой страницы (перед nav.run()), поэтому вставка здесь применяет
 # шрифт ко всем страницам сразу. Google Fonts сам отдаёт и латиницу, и кириллицу
 # (весь интерфейс на русском), подставляя нужный поднабор по unicode-range.
+#
+# <link>, а не CSS @import — @import блокирует отрисовку страницы, пока не
+# скачается шрифт (это происходит на КАЖДОЙ навигации, т.к. app.py
+# перевыполняется целиком); <link rel="stylesheet"> браузер грузит параллельно
+# с остальной страницей, plus preconnect заранее открывает соединение.
 st.markdown(
     """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
     html, body, [class*="css"], .stApp,
     button, input, optgroup, select, textarea,
     h1, h2, h3, h4, h5, h6 {

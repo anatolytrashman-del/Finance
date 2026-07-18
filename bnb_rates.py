@@ -15,15 +15,12 @@ import re
 
 import requests
 
+from web_common import DESKTOP_USER_AGENT
+
 RATES_URL = "https://bnb.by/"
 REQUEST_TIMEOUT = 10
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    )
-}
+_HEADERS = {"User-Agent": DESKTOP_USER_AGENT}
 
 # Только первый блок курсов на странице — тот, что в виджете «Я отдаю/Я получаю»
 # (после него на странице идут другие таблицы — курс для карт и т.п., нам не нужны).

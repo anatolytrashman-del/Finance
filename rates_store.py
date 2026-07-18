@@ -3,9 +3,9 @@
 Файл лежит в домашней директории — переживает обновление кода."""
 import json
 from datetime import datetime
-from pathlib import Path
 
-BASE_DIR = Path.home() / ".trashman_family_office"
+from local_store import APP_DATA_DIR as BASE_DIR
+
 RATES_PATH = BASE_DIR / "bnb_rates.json"
 
 

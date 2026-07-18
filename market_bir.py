@@ -29,11 +29,10 @@ POST-запроса открываем страницу настоящим бр�
 это ровно то же самое действие, что делает живой пользователь."""
 import re
 
+from web_common import DESKTOP_USER_AGENT
+
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": DESKTOP_USER_AGENT,
     "Accept-Language": "ru-RU,ru;q=0.9",
 }
 
