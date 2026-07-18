@@ -7,7 +7,6 @@
 Запуск:  python3 market_scout.py
 Ничего не публикует и не отправляет — только скачивает и сохраняет локально.
 """
-import json
 import time
 import zipfile
 from pathlib import Path
