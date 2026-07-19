@@ -113,12 +113,15 @@ for chosen in choices:
 
         obj_docs = sorted(obj_docs, key=lambda d: d.get("date") or "")
 
-        header = st.columns(ROW_WIDTHS)
+        header = st.columns(ROW_WIDTHS, vertical_alignment="center")
         for col, label in zip(header, ["Тип документа", "Дата", "Номер", "Сумма", "Суть — кратко", "Ссылка"]):
             col.caption(label)
 
         for d in obj_docs:
-            row = st.columns(ROW_WIDTHS)
+            # vertical_alignment="center" + type="tertiary" (без рамки/фона,
+            # мельче стандартной кнопки) — иначе высота строки растягивалась
+            # под здоровенную кнопку по умолчанию.
+            row = st.columns(ROW_WIDTHS, vertical_alignment="center")
             row[0].write(d.get("type", "") or "—")
             row[1].write(_fmt_date(d.get("date")))
             row[2].write(d.get("number", "") or "—")
@@ -126,10 +129,10 @@ for chosen in choices:
             row[4].write(d.get("summary", "") or "—")
             row[5].markdown(f"[Открыть]({d['link']})" if d.get("link") else "—")
             edit_key = f"doc_editing_{d['id']}"
-            if row[6].button("✏️", key=f"doc_edit_btn_{d['id']}", help="Редактировать документ"):
+            if row[6].button("✏️", key=f"doc_edit_btn_{d['id']}", help="Редактировать документ", type="tertiary"):
                 st.session_state[edit_key] = not st.session_state.get(edit_key, False)
                 st.rerun()
-            if row[7].button("🗑", key=f"doc_del_btn_{d['id']}", help="Удалить документ"):
+            if row[7].button("🗑", key=f"doc_del_btn_{d['id']}", help="Удалить документ", type="tertiary"):
                 st.session_state["documents"] = [x for x in documents if x["id"] != d["id"]]
                 _save_and_rerun()
 
