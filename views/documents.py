@@ -92,11 +92,6 @@ with st.expander("➕ Добавить документ", expanded=not documents
 total = len(documents)
 st.caption(f"Всего документов: {total}")
 
-# Пропорции колонок общие для шапки и строк — узкие последние две (иконки
-# редактирования/удаления) специально мелкие и без подписи, чтобы не
-# перетягивали внимание от самих документов.
-ROW_WIDTHS = [1.6, 1, 1, 1.3, 2.6, 1, 0.4, 0.4]
-
 
 def _save_and_rerun():
     save_documents(documents)
@@ -112,28 +107,39 @@ for chosen in choices:
             continue
 
         obj_docs = sorted(obj_docs, key=lambda d: d.get("date") or "")
+        table = pd.DataFrame([
+            {
+                "Тип документа": d.get("type", ""),
+                "Дата": _fmt_date(d.get("date")),
+                "Номер": d.get("number", "") or "—",
+                "Сумма": _fmt_amount(d.get("amount"), d.get("currency", "$")),
+                "Суть — кратко": d.get("summary", "") or "—",
+                "Ссылка": d.get("link", ""),
+            }
+            for d in obj_docs
+        ])
+        table_key = f"docs_table_{chosen['key']}"
+        event = st.dataframe(
+            table, width="stretch", hide_index=True,
+            column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
+            on_select="rerun", selection_mode="single-row", key=table_key,
+        )
+        selected_rows = event.selection.rows if hasattr(event, "selection") else []
 
-        header = st.columns(ROW_WIDTHS, vertical_alignment="center")
-        for col, label in zip(header, ["Тип документа", "Дата", "Номер", "Сумма", "Суть — кратко", "Ссылка"]):
-            col.caption(label)
-
-        for d in obj_docs:
-            # vertical_alignment="center" + type="tertiary" (без рамки/фона,
-            # мельче стандартной кнопки) — иначе высота строки растягивалась
-            # под здоровенную кнопку по умолчанию.
-            row = st.columns(ROW_WIDTHS, vertical_alignment="center")
-            row[0].write(d.get("type", "") or "—")
-            row[1].write(_fmt_date(d.get("date")))
-            row[2].write(d.get("number", "") or "—")
-            row[3].write(_fmt_amount(d.get("amount"), d.get("currency", "$")))
-            row[4].write(d.get("summary", "") or "—")
-            row[5].markdown(f"[Открыть]({d['link']})" if d.get("link") else "—")
+        if not selected_rows:
+            st.caption("Выбери строку в таблице, чтобы отредактировать или удалить документ.")
+        else:
+            d = obj_docs[selected_rows[0]]
             edit_key = f"doc_editing_{d['id']}"
-            if row[6].button("✏️", key=f"doc_edit_btn_{d['id']}", help="Редактировать документ", type="tertiary"):
+            bc1, bc2, _bc3 = st.columns([1, 1, 6])
+            if bc1.button("✏️ Редактировать", key=f"doc_edit_btn_{d['id']}", type="tertiary"):
                 st.session_state[edit_key] = not st.session_state.get(edit_key, False)
                 st.rerun()
-            if row[7].button("🗑", key=f"doc_del_btn_{d['id']}", help="Удалить документ", type="tertiary"):
+            if bc2.button("🗑 Удалить", key=f"doc_del_btn_{d['id']}", type="tertiary"):
                 st.session_state["documents"] = [x for x in documents if x["id"] != d["id"]]
+                # строка, на которую указывал выбор, могла исчезнуть/сдвинуться —
+                # сбрасываем выбор, а не оставляем указывать на что попало
+                st.session_state.pop(table_key, None)
                 _save_and_rerun()
 
             if st.session_state.get(edit_key):
@@ -187,6 +193,7 @@ for chosen in choices:
                         d["summary"] = e_summary.strip()
                         d["link"] = e_link.strip()
                         st.session_state[edit_key] = False
+                        st.session_state.pop(table_key, None)
                         _save_and_rerun()
                     elif cancel_clicked:
                         st.session_state[edit_key] = False
