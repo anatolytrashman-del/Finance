@@ -92,6 +92,17 @@ with st.expander("➕ Добавить документ", expanded=not documents
 total = len(documents)
 st.caption(f"Всего документов: {total}")
 
+# Пропорции колонок общие для шапки и строк — узкие последние две (иконки
+# редактирования/удаления) специально мелкие и без подписи, чтобы не
+# перетягивали внимание от самих документов.
+ROW_WIDTHS = [1.6, 1, 1, 1.3, 2.6, 1, 0.4, 0.4]
+
+
+def _save_and_rerun():
+    save_documents(documents)
+    st.rerun()
+
+
 for chosen in choices:
     obj_docs = [d for d in documents if d.get("object") == chosen["key"]]
     with st.container(border=True):
@@ -101,18 +112,79 @@ for chosen in choices:
             continue
 
         obj_docs = sorted(obj_docs, key=lambda d: d.get("date") or "")
-        table = pd.DataFrame([
-            {
-                "Тип документа": d.get("type", ""),
-                "Дата": _fmt_date(d.get("date")),
-                "Номер": d.get("number", "") or "—",
-                "Сумма": _fmt_amount(d.get("amount"), d.get("currency", "$")),
-                "Суть — кратко": d.get("summary", "") or "—",
-                "Ссылка": d.get("link", ""),
-            }
-            for d in obj_docs
-        ])
-        st.dataframe(
-            table, width="stretch", hide_index=True,
-            column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
-        )
+
+        header = st.columns(ROW_WIDTHS)
+        for col, label in zip(header, ["Тип документа", "Дата", "Номер", "Сумма", "Суть — кратко", "Ссылка"]):
+            col.caption(label)
+
+        for d in obj_docs:
+            row = st.columns(ROW_WIDTHS)
+            row[0].write(d.get("type", "") or "—")
+            row[1].write(_fmt_date(d.get("date")))
+            row[2].write(d.get("number", "") or "—")
+            row[3].write(_fmt_amount(d.get("amount"), d.get("currency", "$")))
+            row[4].write(d.get("summary", "") or "—")
+            row[5].markdown(f"[Открыть]({d['link']})" if d.get("link") else "—")
+            edit_key = f"doc_editing_{d['id']}"
+            if row[6].button("✏️", key=f"doc_edit_btn_{d['id']}", help="Редактировать документ"):
+                st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+                st.rerun()
+            if row[7].button("🗑", key=f"doc_del_btn_{d['id']}", help="Удалить документ"):
+                st.session_state["documents"] = [x for x in documents if x["id"] != d["id"]]
+                _save_and_rerun()
+
+            if st.session_state.get(edit_key):
+                with st.form(f"doc_edit_form_{d['id']}"):
+                    obj_options = range(len(choices))
+                    current_obj_idx = next(
+                        (i for i, c in enumerate(choices) if c["key"] == d.get("object")), 0
+                    )
+                    e_obj_idx = st.selectbox(
+                        "Объект", obj_options, index=current_obj_idx,
+                        format_func=lambda i: choices[i]["label"], key=f"doc_edit_obj_{d['id']}",
+                    )
+                    ec1, ec2, ec3 = st.columns(3)
+                    e_type = ec1.selectbox(
+                        "Тип документа", DOC_TYPES,
+                        index=DOC_TYPES.index(d["type"]) if d.get("type") in DOC_TYPES else 0,
+                        key=f"doc_edit_type_{d['id']}",
+                    )
+                    try:
+                        e_date_default = pd.to_datetime(d.get("date")).date() if d.get("date") else date.today()
+                    except Exception:  # noqa: BLE001
+                        e_date_default = date.today()
+                    e_date = ec2.date_input(
+                        "Дата", value=e_date_default, format="DD.MM.YYYY", key=f"doc_edit_date_{d['id']}",
+                    )
+                    e_number = ec3.text_input("Номер", value=d.get("number", ""), key=f"doc_edit_number_{d['id']}")
+                    ec4, ec5, ec6 = st.columns([1, 1, 3])
+                    e_amount = ec4.number_input(
+                        "Сумма", min_value=0.0, value=float(d.get("amount") or 0.0), step=100.0,
+                        key=f"doc_edit_amount_{d['id']}",
+                    )
+                    e_currency = ec5.selectbox(
+                        "Валюта", CURRENCIES,
+                        index=CURRENCIES.index(d["currency"]) if d.get("currency") in CURRENCIES else 0,
+                        key=f"doc_edit_currency_{d['id']}",
+                    )
+                    e_summary = ec6.text_input("Суть — кратко", value=d.get("summary", ""), key=f"doc_edit_summary_{d['id']}")
+                    e_link = st.text_input("Ссылка на документ (Google Диск)", value=d.get("link", ""), key=f"doc_edit_link_{d['id']}")
+                    fc1, fc2 = st.columns(2)
+                    save_clicked = fc1.form_submit_button("💾 Сохранить", type="primary")
+                    cancel_clicked = fc2.form_submit_button("Отмена")
+                    if save_clicked:
+                        chosen_obj = choices[e_obj_idx]
+                        d["object"] = chosen_obj["key"]
+                        d["object_label"] = chosen_obj["label"]
+                        d["type"] = e_type
+                        d["date"] = e_date.isoformat()
+                        d["number"] = e_number.strip()
+                        d["amount"] = e_amount
+                        d["currency"] = e_currency
+                        d["summary"] = e_summary.strip()
+                        d["link"] = e_link.strip()
+                        st.session_state[edit_key] = False
+                        _save_and_rerun()
+                    elif cancel_clicked:
+                        st.session_state[edit_key] = False
+                        st.rerun()
