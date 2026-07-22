@@ -48,8 +48,9 @@ def _persist():
     save_ideas(st.session_state["ideas"])
 
 
-active = [i for i in ideas if not i.get("done")]
+active = [i for i in ideas if not i.get("done") and not i.get("rejected")]
 done = [i for i in ideas if i.get("done")]
+rejected = [i for i in ideas if i.get("rejected")]
 
 # --- Форма добавления ---
 with st.expander("➕ Добавить идею", expanded=not active):
@@ -110,13 +111,18 @@ else:
                         st.session_state["editing_id"] = None
                         st.rerun()
             else:
-                head, done_btn, edit_btn, del_btn = st.columns([7, 1, 1, 1])
+                head, done_btn, reject_btn, edit_btn, del_btn = st.columns([6, 1, 1, 1, 1])
                 head.markdown(f"### {_md(idea['name'])}")
                 if idea.get("status"):
                     head.markdown(_badge(idea["status"]), unsafe_allow_html=True)
                 if done_btn.button("✅", key=f"done_{idea['id']}", help="Отметить реализованной"):
                     idea["done"] = True
                     idea["done_at"] = date.today().isoformat()
+                    _persist()
+                    st.rerun()
+                if reject_btn.button("⛔", key=f"reject_{idea['id']}", help="Отклонить идею"):
+                    idea["rejected"] = True
+                    idea["rejected_at"] = date.today().isoformat()
                     _persist()
                     st.rerun()
                 if edit_btn.button("✏️", key=f"edit_{idea['id']}", help="Редактировать идею"):
@@ -151,6 +157,33 @@ if done:
                 _persist()
                 st.rerun()
             if del_btn.button("🗑", key=f"donedel_{idea['id']}", help="Удалить из истории"):
+                st.session_state["ideas"] = [i for i in ideas if i["id"] != idea["id"]]
+                _persist()
+                st.rerun()
+            _pros_cons(idea)
+
+# --- История: отклонённые идеи ---
+if rejected:
+    st.divider()
+    st.subheader(f"⛔ Отклонённые идеи ({len(rejected)})")
+    rejected_sorted = sorted(rejected, key=lambda i: i.get("rejected_at", ""), reverse=True)
+    for idea in rejected_sorted:
+        with st.container(border=True):
+            head, back_btn, del_btn = st.columns([8, 1, 1])
+            head.markdown(f"### {_md(idea['name'])}")
+            if idea.get("rejected_at"):
+                head.markdown(
+                    _badge(f"Отклонено {_fmt_date(idea['rejected_at'])}", bg="#fdecea", color="#b3261e"),
+                    unsafe_allow_html=True,
+                )
+            if idea.get("status"):
+                head.caption(f"Статус на момент отклонения: {idea['status']}")
+            if back_btn.button("↩️", key=f"rejback_{idea['id']}", help="Вернуть в активные"):
+                idea["rejected"] = False
+                idea.pop("rejected_at", None)
+                _persist()
+                st.rerun()
+            if del_btn.button("🗑", key=f"rejdel_{idea['id']}", help="Удалить из истории"):
                 st.session_state["ideas"] = [i for i in ideas if i["id"] != idea["id"]]
                 _persist()
                 st.rerun()
