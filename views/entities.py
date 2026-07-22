@@ -4,18 +4,24 @@ from datetime import date
 import streamlit as st
 
 from entities_store import load_entities, save_entities
+from okved_store import load_okved, save_okved
 
 st.title("🏛️ Юрлица")
 st.caption("Справочник ООО/ИП — регистрационные данные, юр. адрес, налоговый режим, владение.")
 
 if "entities" not in st.session_state:
     st.session_state["entities"] = load_entities()
+if "okved_reference" not in st.session_state:
+    st.session_state["okved_reference"] = load_okved()
 
 entities = st.session_state["entities"]
+okved_reference = st.session_state["okved_reference"]
 
 ENTITY_TYPES = ["ООО", "ИП"]
 STATUSES = ["Действует", "Требуется ликвидация"]
 TAX_SYSTEMS = ["УСН доходы", "УСН доходы-расходы", "ОСН", "Патент", "Иное"]
+EDO_STATUSES = ["Подключён Диадок", "Не подключён"]
+ESIGN_STATUSES = ["Есть", "Нет"]
 
 STATUS_COLORS = {
     "Действует": ("#e6f4ea", "#1b5e20"),
@@ -55,6 +61,34 @@ def _field(label, value):
     if not value:
         return
     st.markdown(f"**{_md(label)}:** {_md(value)}")
+
+
+def _okved_label(code):
+    entry = next((o for o in okved_reference if o["code"] == code), None)
+    return f"{code} — {entry['description']}" if entry else code
+
+
+# ============================ Справочник ОКВЭД ============================
+with st.expander(f"📋 Справочник кодов ОКВЭД ({len(okved_reference)})", expanded=False):
+    st.caption("Коды из этого списка можно выбирать при заполнении юрлица. Пополняй по мере надобности.")
+    with st.form("add_okved", clear_on_submit=True):
+        oc1, oc2 = st.columns([1, 3])
+        new_code = oc1.text_input("Код")
+        new_desc = oc2.text_input("Описание")
+        if st.form_submit_button("➕ Добавить код в справочник"):
+            code = new_code.strip()
+            if code and new_desc.strip() and not any(o["code"] == code for o in okved_reference):
+                okved_reference.append({"code": code, "description": new_desc.strip()})
+                save_okved(okved_reference)
+                st.rerun()
+            elif not code or not new_desc.strip():
+                st.warning("Укажи и код, и описание.")
+            else:
+                st.warning("Такой код уже есть в справочнике.")
+    for o in okved_reference:
+        st.caption(f"{o['code']} — {o['description']}")
+
+OKVED_CODES = [o["code"] for o in okved_reference]
 
 
 def _render_form(prefix, existing=None):
@@ -114,10 +148,59 @@ def _render_form(prefix, existing=None):
     director = o2.text_input("Директор", value=e.get("director", ""), key=f"{prefix}_director")
     other_founders = o3.text_input("Прочие учредители", value=e.get("other_founders", ""), key=f"{prefix}_founders")
 
-    st.markdown("###### Финансы и деятельность")
-    f1, f2 = st.columns(2)
-    bank_account = f1.text_input("Расчётный счёт", value=e.get("bank_account", ""), key=f"{prefix}_bankacc")
-    activity = f2.text_input("Вид деятельности", value=e.get("activity", ""), key=f"{prefix}_activity")
+    st.markdown("###### Финансы — расчётный счёт")
+    bank_account = st.text_input("Расчётный счёт", value=e.get("bank_account", ""), key=f"{prefix}_bankacc")
+    b1, b2 = st.columns(2)
+    bank_name = b1.text_input("Наименование банка", value=e.get("bank_name", ""), key=f"{prefix}_bankname")
+    bank_inn = b2.text_input("ИНН банка", value=e.get("bank_inn", ""), key=f"{prefix}_bankinn")
+    b3, b4 = st.columns(2)
+    bank_bik = b3.text_input("БИК", value=e.get("bank_bik", ""), key=f"{prefix}_bankbik")
+    bank_corr_account = b4.text_input("Корреспондентский счёт", value=e.get("bank_corr_account", ""), key=f"{prefix}_bankcorr")
+    bank_address = st.text_input("Юридический адрес банка", value=e.get("bank_address", ""), key=f"{prefix}_bankaddr")
+
+    st.markdown("###### ЭДО и ЭЦП")
+    d1, d2, d3 = st.columns(3)
+    edo_status = d1.selectbox(
+        "Электронный документооборот", EDO_STATUSES,
+        index=EDO_STATUSES.index(e["edo_status"]) if e.get("edo_status") in EDO_STATUSES else 1,
+        key=f"{prefix}_edo",
+    )
+    esign_status = d2.selectbox(
+        "Наличие ЭЦП", ESIGN_STATUSES,
+        index=ESIGN_STATUSES.index(e["esign_status"]) if e.get("esign_status") in ESIGN_STATUSES else 1,
+        key=f"{prefix}_esign",
+    )
+    try:
+        esign_expiry_default = date.fromisoformat(e["esign_expiry"]) if e.get("esign_expiry") else None
+    except Exception:  # noqa: BLE001
+        esign_expiry_default = None
+    esign_expiry = d3.date_input(
+        "Срок годности токена", value=esign_expiry_default, format="DD.MM.YYYY", key=f"{prefix}_esignexp",
+    )
+
+    st.markdown("###### Виды деятельности (ОКВЭД)")
+    if not OKVED_CODES:
+        st.caption("Справочник ОКВЭД пуст — добавь коды в блоке «📋 Справочник кодов ОКВЭД» выше.")
+        okved_main = e.get("okved_main", "")
+        okved_additional = e.get("okved_additional", [])
+    else:
+        main_options = ["—"] + OKVED_CODES
+        main_default = e.get("okved_main", "")
+        okved_main_choice = st.selectbox(
+            "Основной код ОКВЭД", main_options,
+            index=main_options.index(main_default) if main_default in main_options else 0,
+            format_func=lambda c: "—" if c == "—" else _okved_label(c),
+            key=f"{prefix}_okvedmain",
+        )
+        okved_main = "" if okved_main_choice == "—" else okved_main_choice
+        additional_default = [c for c in e.get("okved_additional", []) if c in OKVED_CODES and c != okved_main]
+        okved_additional = st.multiselect(
+            "Дополнительные коды ОКВЭД",
+            [c for c in OKVED_CODES if c != okved_main],
+            default=additional_default,
+            format_func=_okved_label,
+            key=f"{prefix}_okvedadd",
+        )
 
     return {
         "name": name.strip(),
@@ -137,7 +220,16 @@ def _render_form(prefix, existing=None):
         "director": director.strip(),
         "other_founders": other_founders.strip(),
         "bank_account": bank_account.strip(),
-        "activity": activity.strip(),
+        "bank_name": bank_name.strip(),
+        "bank_inn": bank_inn.strip(),
+        "bank_bik": bank_bik.strip(),
+        "bank_corr_account": bank_corr_account.strip(),
+        "bank_address": bank_address.strip(),
+        "edo_status": edo_status,
+        "esign_status": esign_status,
+        "esign_expiry": esign_expiry.isoformat() if esign_expiry else "",
+        "okved_main": okved_main,
+        "okved_additional": okved_additional,
     }
 
 
@@ -199,9 +291,6 @@ else:
                     _field("Дата регистрации", _fmt_date(ent.get("reg_date")))
                     _field("Система налогообложения", ent.get("tax_system"))
                     _field("Ставка", ent.get("tax_rate"))
-                    _field("Расчётный счёт", ent.get("bank_account"))
-                    _field("Вид деятельности", ent.get("activity"))
-                with col_r:
                     _field("Доля владения", f"{ent['ownership_share']:.0f}%" if ent.get("ownership_share") else "")
                     _field("Директор", ent.get("director"))
                     _field("Прочие учредители", ent.get("other_founders"))
@@ -209,3 +298,19 @@ else:
                     _field("Подрядчик по адресу", ent.get("address_provider"))
                     _field("Контакт", ent.get("address_contact"))
                     _field("Окончание договора адреса", _fmt_date(ent.get("address_contract_end")))
+                with col_r:
+                    _field("Расчётный счёт", ent.get("bank_account"))
+                    _field("Банк", ent.get("bank_name"))
+                    _field("ИНН банка", ent.get("bank_inn"))
+                    _field("БИК", ent.get("bank_bik"))
+                    _field("Корр. счёт", ent.get("bank_corr_account"))
+                    _field("Юр. адрес банка", ent.get("bank_address"))
+                    _field("ЭДО", ent.get("edo_status"))
+                    _field("ЭЦП", ent.get("esign_status"))
+                    _field("Срок годности токена", _fmt_date(ent.get("esign_expiry")))
+                    if ent.get("okved_main"):
+                        _field("Основной ОКВЭД", _okved_label(ent["okved_main"]))
+                    if ent.get("okved_additional"):
+                        st.markdown("**Доп. ОКВЭД:**")
+                        for code in ent["okved_additional"]:
+                            st.caption(_okved_label(code))
