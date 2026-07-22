@@ -4,7 +4,7 @@ from datetime import date
 import streamlit as st
 
 from entities_store import load_entities, save_entities
-from okved_store import load_okved, save_okved
+from okved_store import load_okved
 
 st.title("🏛️ Юрлица")
 st.caption("Справочник ООО/ИП — регистрационные данные, юр. адрес, налоговый режим, владение.")
@@ -16,6 +16,7 @@ if "okved_reference" not in st.session_state:
 
 entities = st.session_state["entities"]
 okved_reference = st.session_state["okved_reference"]
+OKVED_CODES = [o["code"] for o in okved_reference]
 
 ENTITY_TYPES = ["ООО", "ИП"]
 STATUSES = ["Действует", "Требуется ликвидация"]
@@ -27,18 +28,20 @@ STATUS_COLORS = {
     "Действует": ("#e6f4ea", "#1b5e20"),
     "Требуется ликвидация": ("#fdecea", "#b3261e"),
 }
+GOOD = ("#e6f4ea", "#1b5e20")
+NEUTRAL = ("#f1f1f4", "#5f6368")
 
 
 def _md(text):
     return str(text or "").replace("$", r"\$")
 
 
-def _badge(text):
-    bg, color = STATUS_COLORS.get(text, ("#eef2f9", "#1a1a2e"))
+def _pill(text, colors):
+    bg, color = colors
     return (
         f"<span style='display:inline-block;background:{bg};color:{color};"
-        "padding:3px 12px;border-radius:14px;font-size:0.9rem;font-weight:600;"
-        f"margin:2px 0'>{_md(text)}</span>"
+        "padding:3px 12px;border-radius:14px;font-size:0.85rem;font-weight:600;"
+        f"margin:2px 6px 2px 0'>{_md(text)}</span>"
     )
 
 
@@ -55,40 +58,19 @@ def _persist():
     save_entities(st.session_state["entities"])
 
 
-def _field(label, value):
-    """Строка «label: value» — пропускается целиком, если значение пустое,
-    чтобы карточка не пестрела прочерками по незаполненным полям."""
+def _chip(col, label, value):
+    """Компактная пара «подпись сверху / значение снизу» в конкретной
+    колонке — не рисуется вовсе, если значение пустое (чтобы карточка не
+    пестрела прочерками по незаполненным полям)."""
     if not value:
         return
-    st.markdown(f"**{_md(label)}:** {_md(value)}")
+    col.caption(label)
+    col.write(_md(value))
 
 
 def _okved_label(code):
     entry = next((o for o in okved_reference if o["code"] == code), None)
     return f"{code} — {entry['description']}" if entry else code
-
-
-# ============================ Справочник ОКВЭД ============================
-with st.expander(f"📋 Справочник кодов ОКВЭД ({len(okved_reference)})", expanded=False):
-    st.caption("Коды из этого списка можно выбирать при заполнении юрлица. Пополняй по мере надобности.")
-    with st.form("add_okved", clear_on_submit=True):
-        oc1, oc2 = st.columns([1, 3])
-        new_code = oc1.text_input("Код")
-        new_desc = oc2.text_input("Описание")
-        if st.form_submit_button("➕ Добавить код в справочник"):
-            code = new_code.strip()
-            if code and new_desc.strip() and not any(o["code"] == code for o in okved_reference):
-                okved_reference.append({"code": code, "description": new_desc.strip()})
-                save_okved(okved_reference)
-                st.rerun()
-            elif not code or not new_desc.strip():
-                st.warning("Укажи и код, и описание.")
-            else:
-                st.warning("Такой код уже есть в справочнике.")
-    for o in okved_reference:
-        st.caption(f"{o['code']} — {o['description']}")
-
-OKVED_CODES = [o["code"] for o in okved_reference]
 
 
 def _render_form(prefix, existing=None):
@@ -180,7 +162,7 @@ def _render_form(prefix, existing=None):
 
     st.markdown("###### Виды деятельности (ОКВЭД)")
     if not OKVED_CODES:
-        st.caption("Справочник ОКВЭД пуст — добавь коды в блоке «📋 Справочник кодов ОКВЭД» выше.")
+        st.caption("Справочник ОКВЭД пуст — попроси добавить в него коды.")
         okved_main = e.get("okved_main", "")
         okved_additional = e.get("okved_additional", [])
     else:
@@ -270,47 +252,79 @@ else:
                     if b_cancel.form_submit_button("Отмена"):
                         st.session_state["editing_entity_id"] = None
                         st.rerun()
-            else:
-                head, edit_btn, del_btn = st.columns([7, 1, 1])
-                head.markdown(f"### {_md(ent['name'])} · {_md(ent.get('type', ''))}")
-                if ent.get("status"):
-                    head.markdown(_badge(ent["status"]), unsafe_allow_html=True)
-                if edit_btn.button("✏️", key=f"entedit_{ent['id']}", help="Редактировать юрлицо", type="tertiary"):
-                    st.session_state["editing_entity_id"] = ent["id"]
-                    st.rerun()
-                if del_btn.button("🗑", key=f"entdel_{ent['id']}", help="Удалить юрлицо", type="tertiary"):
-                    st.session_state["entities"] = [x for x in entities if x["id"] != ent["id"]]
-                    _persist()
-                    st.rerun()
+                continue
 
-                col_l, col_r = st.columns(2)
-                with col_l:
-                    _field("ИНН", ent.get("inn"))
-                    _field("ОГРН/ОГРНИП", ent.get("ogrn"))
-                    _field("КПП", ent.get("kpp"))
-                    _field("Дата регистрации", _fmt_date(ent.get("reg_date")))
-                    _field("Система налогообложения", ent.get("tax_system"))
-                    _field("Ставка", ent.get("tax_rate"))
-                    _field("Доля владения", f"{ent['ownership_share']:.0f}%" if ent.get("ownership_share") else "")
-                    _field("Директор", ent.get("director"))
-                    _field("Прочие учредители", ent.get("other_founders"))
-                    _field("Юридический адрес", ent.get("address"))
-                    _field("Подрядчик по адресу", ent.get("address_provider"))
-                    _field("Контакт", ent.get("address_contact"))
-                    _field("Окончание договора адреса", _fmt_date(ent.get("address_contract_end")))
-                with col_r:
-                    _field("Расчётный счёт", ent.get("bank_account"))
-                    _field("Банк", ent.get("bank_name"))
-                    _field("ИНН банка", ent.get("bank_inn"))
-                    _field("БИК", ent.get("bank_bik"))
-                    _field("Корр. счёт", ent.get("bank_corr_account"))
-                    _field("Юр. адрес банка", ent.get("bank_address"))
-                    _field("ЭДО", ent.get("edo_status"))
-                    _field("ЭЦП", ent.get("esign_status"))
-                    _field("Срок годности токена", _fmt_date(ent.get("esign_expiry")))
-                    if ent.get("okved_main"):
-                        _field("Основной ОКВЭД", _okved_label(ent["okved_main"]))
-                    if ent.get("okved_additional"):
-                        st.markdown("**Доп. ОКВЭД:**")
-                        for code in ent["okved_additional"]:
-                            st.caption(_okved_label(code))
+            # ---------------- Заголовок: название, статус, ЭДО/ЭЦП, кнопки ----------------
+            head, edit_btn, del_btn = st.columns([7, 1, 1])
+            head.markdown(f"### {_md(ent['name'])} · {_md(ent.get('type', ''))}")
+            pills = []
+            if ent.get("status"):
+                pills.append(_pill(ent["status"], STATUS_COLORS.get(ent["status"], NEUTRAL)))
+            if ent.get("edo_status") == "Подключён Диадок":
+                pills.append(_pill("📄 ЭДО: Диадок", GOOD))
+            else:
+                pills.append(_pill("📄 ЭДО: нет", NEUTRAL))
+            if ent.get("esign_status") == "Есть":
+                exp = f" до {_fmt_date(ent['esign_expiry'])}" if ent.get("esign_expiry") else ""
+                pills.append(_pill(f"🔏 ЭЦП{exp}", GOOD))
+            else:
+                pills.append(_pill("🔏 ЭЦП: нет", NEUTRAL))
+            head.markdown("".join(pills), unsafe_allow_html=True)
+            if edit_btn.button("✏️", key=f"entedit_{ent['id']}", help="Редактировать юрлицо", type="tertiary"):
+                st.session_state["editing_entity_id"] = ent["id"]
+                st.rerun()
+            if del_btn.button("🗑", key=f"entdel_{ent['id']}", help="Удалить юрлицо", type="tertiary"):
+                st.session_state["entities"] = [x for x in entities if x["id"] != ent["id"]]
+                _persist()
+                st.rerun()
+
+            # ---------------- Идентификация ----------------
+            id_cols = st.columns(4)
+            _chip(id_cols[0], "ИНН", ent.get("inn"))
+            _chip(id_cols[1], "ОГРН/ОГРНИП", ent.get("ogrn"))
+            _chip(id_cols[2], "КПП", ent.get("kpp"))
+            _chip(id_cols[3], "Дата регистрации", _fmt_date(ent.get("reg_date")))
+
+            # ---------------- Налоги, владение, деятельность ----------------
+            tax_cols = st.columns(4)
+            _chip(tax_cols[0], "Система налогообложения", ent.get("tax_system"))
+            _chip(tax_cols[1], "Ставка", ent.get("tax_rate"))
+            _chip(tax_cols[2], "Доля владения", f"{ent['ownership_share']:.0f}%" if ent.get("ownership_share") else "")
+            _chip(tax_cols[3], "Директор", ent.get("director"))
+            if ent.get("other_founders"):
+                st.caption("Прочие учредители")
+                st.write(_md(ent["other_founders"]))
+
+            if ent.get("okved_main") or ent.get("okved_additional"):
+                st.caption("Виды деятельности (ОКВЭД)")
+                lines = []
+                if ent.get("okved_main"):
+                    lines.append(f"**{_okved_label(ent['okved_main'])}**")
+                lines.extend(_okved_label(c) for c in ent.get("okved_additional") or [])
+                st.markdown("  \n".join(lines))
+
+            # ---------------- Юридический адрес ----------------
+            if any(ent.get(k) for k in ("address", "address_provider", "address_contact", "address_contract_end")):
+                st.markdown("###### 📍 Юридический адрес")
+                addr_cols = st.columns(4)
+                _chip(addr_cols[0], "Адрес", ent.get("address"))
+                _chip(addr_cols[1], "Подрядчик", ent.get("address_provider"))
+                _chip(addr_cols[2], "Контакт", ent.get("address_contact"))
+                _chip(addr_cols[3], "Окончание договора", _fmt_date(ent.get("address_contract_end")))
+
+            # ---------------- Банковские реквизиты (свёрнуто) ----------------
+            has_bank_info = any(
+                ent.get(k) for k in
+                ("bank_account", "bank_name", "bank_inn", "bank_bik", "bank_corr_account", "bank_address")
+            )
+            if has_bank_info:
+                with st.expander("🏦 Банковские реквизиты"):
+                    bank_cols1 = st.columns(2)
+                    _chip(bank_cols1[0], "Расчётный счёт", ent.get("bank_account"))
+                    _chip(bank_cols1[1], "Банк", ent.get("bank_name"))
+                    bank_cols2 = st.columns(2)
+                    _chip(bank_cols2[0], "ИНН банка", ent.get("bank_inn"))
+                    _chip(bank_cols2[1], "БИК", ent.get("bank_bik"))
+                    bank_cols3 = st.columns(2)
+                    _chip(bank_cols3[0], "Корр. счёт", ent.get("bank_corr_account"))
+                    _chip(bank_cols3[1], "Юр. адрес банка", ent.get("bank_address"))
