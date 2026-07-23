@@ -22,7 +22,7 @@ ENTITY_TYPES = ["ООО", "ИП"]
 STATUSES = ["Действует", "Требуется ликвидация"]
 TAX_SYSTEMS = ["УСН доходы", "УСН доходы-расходы", "ОСН", "Патент", "Иное"]
 EDO_STATUSES = ["Подключён Диадок", "Не подключён"]
-ESIGN_STATUSES = ["Есть", "Нет"]
+ESIGN_STATUSES = ["Есть", "Требуется продление"]
 
 STATUS_COLORS = {
     "Действует": ("#e6f4ea", "#1b5e20"),
@@ -30,6 +30,7 @@ STATUS_COLORS = {
 }
 GOOD = ("#e6f4ea", "#1b5e20")
 NEUTRAL = ("#f1f1f4", "#5f6368")
+DANGER = ("#fdecea", "#b3261e")
 
 
 def _md(text):
@@ -255,8 +256,9 @@ else:
                 continue
 
             # ---------------- Заголовок: название, статус, ЭДО/ЭЦП, кнопки ----------------
+            is_ip = ent.get("type") == "ИП"
             head, edit_btn, del_btn = st.columns([7, 1, 1])
-            head.markdown(f"### {_md(ent['name'])} · {_md(ent.get('type', ''))}")
+            head.markdown(f"### {_md(ent['name'])}")
             pills = []
             if ent.get("status"):
                 pills.append(_pill(ent["status"], STATUS_COLORS.get(ent["status"], NEUTRAL)))
@@ -268,7 +270,7 @@ else:
                 exp = f" до {_fmt_date(ent['esign_expiry'])}" if ent.get("esign_expiry") else ""
                 pills.append(_pill(f"🔏 ЭЦП{exp}", GOOD))
             else:
-                pills.append(_pill("🔏 ЭЦП: нет", NEUTRAL))
+                pills.append(_pill("🔏 ЭЦП: требуется продление", DANGER))
             head.markdown("".join(pills), unsafe_allow_html=True)
             if edit_btn.button("✏️", key=f"entedit_{ent['id']}", help="Редактировать юрлицо", type="tertiary"):
                 st.session_state["editing_entity_id"] = ent["id"]
@@ -279,19 +281,28 @@ else:
                 st.rerun()
 
             # ---------------- Идентификация ----------------
-            id_cols = st.columns(4)
-            _chip(id_cols[0], "ИНН", ent.get("inn"))
-            _chip(id_cols[1], "ОГРН/ОГРНИП", ent.get("ogrn"))
-            _chip(id_cols[2], "КПП", ent.get("kpp"))
-            _chip(id_cols[3], "Дата регистрации", _fmt_date(ent.get("reg_date")))
+            # КПП — только у ООО, у ИП такого реквизита не бывает
+            id_pairs = [("ИНН", ent.get("inn")), ("ОГРН/ОГРНИП", ent.get("ogrn"))]
+            if not is_ip:
+                id_pairs.append(("КПП", ent.get("kpp")))
+            id_pairs.append(("Дата регистрации", _fmt_date(ent.get("reg_date"))))
+            id_cols = st.columns(len(id_pairs))
+            for col, (label, value) in zip(id_cols, id_pairs):
+                _chip(col, label, value)
 
             # ---------------- Налоги, владение, деятельность ----------------
-            tax_cols = st.columns(4)
-            _chip(tax_cols[0], "Система налогообложения", ent.get("tax_system"))
-            _chip(tax_cols[1], "Ставка", ent.get("tax_rate"))
-            _chip(tax_cols[2], "Доля владения", f"{ent['ownership_share']:.0f}%" if ent.get("ownership_share") else "")
-            _chip(tax_cols[3], "Директор", ent.get("director"))
-            if ent.get("other_founders"):
+            # Доля владения/директор/учредители — не имеют смысла для ИП
+            # (это про структуру собственности юрлица, а не физлица-предпринимателя)
+            tax_pairs = [("Система налогообложения", ent.get("tax_system")), ("Ставка", ent.get("tax_rate"))]
+            if not is_ip:
+                tax_pairs.append(
+                    ("Доля владения", f"{ent['ownership_share']:.0f}%" if ent.get("ownership_share") else "")
+                )
+                tax_pairs.append(("Директор", ent.get("director")))
+            tax_cols = st.columns(len(tax_pairs))
+            for col, (label, value) in zip(tax_cols, tax_pairs):
+                _chip(col, label, value)
+            if not is_ip and ent.get("other_founders"):
                 st.caption("Прочие учредители")
                 st.write(_md(ent["other_founders"]))
 
