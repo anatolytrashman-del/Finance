@@ -28,6 +28,7 @@ STATUS_COLORS = {
     "Действует": ("#e6f4ea", "#1b5e20"),
     "Требуется ликвидация": ("#fdecea", "#b3261e"),
 }
+STATUS_ICONS = {"Действует": "✅", "Требуется ликвидация": "⚠️"}
 GOOD = ("#e6f4ea", "#1b5e20")
 NEUTRAL = ("#f1f1f4", "#5f6368")
 DANGER = ("#fdecea", "#b3261e")
@@ -41,7 +42,8 @@ def _pill(text, colors):
     bg, color = colors
     return (
         f"<span style='display:inline-block;background:{bg};color:{color};"
-        "padding:3px 12px;border-radius:14px;font-size:0.85rem;font-weight:600;"
+        "padding:4px 14px;border-radius:16px;font-size:0.8rem;font-weight:600;"
+        "letter-spacing:.01em;box-shadow:0 1px 2px rgba(0,0,0,.06);"
         f"margin:2px 6px 2px 0'>{_md(text)}</span>"
     )
 
@@ -59,14 +61,25 @@ def _persist():
     save_entities(st.session_state["entities"])
 
 
-def _chip(col, label, value):
-    """Компактная пара «подпись сверху / значение снизу» в конкретной
-    колонке — не рисуется вовсе, если значение пустое (чтобы карточка не
-    пестрела прочерками по незаполненным полям)."""
+def _chip(col, label, value, icon=""):
+    """Компактное поле «подпись сверху / значение снизу» — не рисуется
+    вовсе, если значение пустое (чтобы карточка не пестрела прочерками по
+    незаполненным полям)."""
     if not value:
         return
-    col.caption(label)
-    col.write(_md(value))
+    prefix = f"{icon} " if icon else ""
+    col.markdown(
+        "<div style='margin-bottom:12px'>"
+        f"<div style='font-size:0.72rem;font-weight:600;color:#8a8fa3;"
+        f"text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px'>{prefix}{_md(label)}</div>"
+        f"<div style='font-size:0.95rem;font-weight:600;color:#1a1a2e'>{_md(value)}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _block_title(text):
+    st.markdown(f"<div style='font-weight:700;font-size:0.95rem;margin-bottom:8px'>{text}</div>", unsafe_allow_html=True)
 
 
 def _okved_label(code):
@@ -255,13 +268,14 @@ else:
                         st.rerun()
                 continue
 
-            # ---------------- Заголовок: название, статус, ЭДО/ЭЦП, кнопки ----------------
+            # ---------------- Заголовок: название, статусы, кнопки ----------------
             is_ip = ent.get("type") == "ИП"
             head, edit_btn, del_btn = st.columns([7, 1, 1])
             head.markdown(f"### {_md(ent['name'])}")
             pills = []
             if ent.get("status"):
-                pills.append(_pill(ent["status"], STATUS_COLORS.get(ent["status"], NEUTRAL)))
+                icon = STATUS_ICONS.get(ent["status"], "")
+                pills.append(_pill(f"{icon} {ent['status']}".strip(), STATUS_COLORS.get(ent["status"], NEUTRAL)))
             if ent.get("edo_status") == "Подключён Диадок":
                 pills.append(_pill("📄 ЭДО: Диадок", GOOD))
             else:
@@ -280,62 +294,90 @@ else:
                 _persist()
                 st.rerun()
 
-            # ---------------- Идентификация ----------------
-            # КПП — только у ООО, у ИП такого реквизита не бывает
-            id_pairs = [("ИНН", ent.get("inn")), ("ОГРН/ОГРНИП", ent.get("ogrn"))]
-            if not is_ip:
-                id_pairs.append(("КПП", ent.get("kpp")))
-            id_pairs.append(("Дата регистрации", _fmt_date(ent.get("reg_date"))))
-            id_cols = st.columns(len(id_pairs))
-            for col, (label, value) in zip(id_cols, id_pairs):
-                _chip(col, label, value)
+            # ---------------- Превью: самое важное, видно сразу ----------------
+            prev_cols = st.columns(4)
+            _chip(prev_cols[0], "ИНН", ent.get("inn"), "🆔")
+            _chip(prev_cols[1], "ОГРН/ОГРНИП", ent.get("ogrn"), "📋")
+            _chip(prev_cols[2], "Юр. адрес", ent.get("address"), "📍")
+            _chip(prev_cols[3], "Расчётный счёт", ent.get("bank_account"), "💳")
 
-            # ---------------- Налоги, владение, деятельность ----------------
-            # Доля владения/директор/учредители — не имеют смысла для ИП
-            # (это про структуру собственности юрлица, а не физлица-предпринимателя)
-            tax_pairs = [("Система налогообложения", ent.get("tax_system")), ("Ставка", ent.get("tax_rate"))]
-            if not is_ip:
-                tax_pairs.append(
-                    ("Доля владения", f"{ent['ownership_share']:.0f}%" if ent.get("ownership_share") else "")
-                )
-                tax_pairs.append(("Директор", ent.get("director")))
-            tax_cols = st.columns(len(tax_pairs))
-            for col, (label, value) in zip(tax_cols, tax_pairs):
-                _chip(col, label, value)
-            if not is_ip and ent.get("other_founders"):
-                st.caption("Прочие учредители")
-                st.write(_md(ent["other_founders"]))
+            # ---------------- Подробности: остальное — под спойлером, по блокам ----------------
+            with st.expander("Подробнее"):
+                shown = {"v": False}
 
-            if ent.get("okved_main") or ent.get("okved_additional"):
-                st.caption("Виды деятельности (ОКВЭД)")
-                lines = []
-                if ent.get("okved_main"):
-                    lines.append(f"**{_okved_label(ent['okved_main'])}**")
-                lines.extend(_okved_label(c) for c in ent.get("okved_additional") or [])
-                st.markdown("  \n".join(lines))
+                def _sep():
+                    if shown["v"]:
+                        st.divider()
+                    shown["v"] = True
 
-            # ---------------- Юридический адрес ----------------
-            if any(ent.get(k) for k in ("address", "address_provider", "address_contact", "address_contract_end")):
-                st.markdown("###### 📍 Юридический адрес")
-                addr_cols = st.columns(4)
-                _chip(addr_cols[0], "Адрес", ent.get("address"))
-                _chip(addr_cols[1], "Подрядчик", ent.get("address_provider"))
-                _chip(addr_cols[2], "Контакт", ent.get("address_contact"))
-                _chip(addr_cols[3], "Окончание договора", _fmt_date(ent.get("address_contract_end")))
+                # КПП (только ООО) + дата регистрации
+                _sep()
+                _block_title("📋 Реквизиты")
+                req_pairs = []
+                if not is_ip:
+                    req_pairs.append(("КПП", ent.get("kpp")))
+                req_pairs.append(("Дата регистрации", _fmt_date(ent.get("reg_date"))))
+                req_cols = st.columns(len(req_pairs))
+                for col, (label, value) in zip(req_cols, req_pairs):
+                    _chip(col, label, value)
 
-            # ---------------- Банковские реквизиты (свёрнуто) ----------------
-            has_bank_info = any(
-                ent.get(k) for k in
-                ("bank_account", "bank_name", "bank_inn", "bank_bik", "bank_corr_account", "bank_address")
-            )
-            if has_bank_info:
-                with st.expander("🏦 Банковские реквизиты"):
+                # Юридический адрес — детали (сам адрес уже в превью)
+                if any(ent.get(k) for k in ("address_provider", "address_contact", "address_contract_end")):
+                    _sep()
+                    _block_title("📍 Юридический адрес")
+                    addr_pairs = [
+                        ("Подрядчик", ent.get("address_provider")),
+                        ("Контакт", ent.get("address_contact")),
+                        ("Окончание договора", _fmt_date(ent.get("address_contract_end"))),
+                    ]
+                    addr_cols = st.columns(3)
+                    for col, (label, value) in zip(addr_cols, addr_pairs):
+                        _chip(col, label, value)
+
+                # Банк — детали (расчётный счёт уже в превью)
+                if any(ent.get(k) for k in ("bank_name", "bank_inn", "bank_bik", "bank_corr_account", "bank_address")):
+                    _sep()
+                    _block_title("🏦 Банк")
+                    bank_pairs1 = [("Банк", ent.get("bank_name")), ("ИНН банка", ent.get("bank_inn"))]
                     bank_cols1 = st.columns(2)
-                    _chip(bank_cols1[0], "Расчётный счёт", ent.get("bank_account"))
-                    _chip(bank_cols1[1], "Банк", ent.get("bank_name"))
+                    for col, (label, value) in zip(bank_cols1, bank_pairs1):
+                        _chip(col, label, value)
+                    bank_pairs2 = [("БИК", ent.get("bank_bik")), ("Корр. счёт", ent.get("bank_corr_account"))]
                     bank_cols2 = st.columns(2)
-                    _chip(bank_cols2[0], "ИНН банка", ent.get("bank_inn"))
-                    _chip(bank_cols2[1], "БИК", ent.get("bank_bik"))
-                    bank_cols3 = st.columns(2)
-                    _chip(bank_cols3[0], "Корр. счёт", ent.get("bank_corr_account"))
-                    _chip(bank_cols3[1], "Юр. адрес банка", ent.get("bank_address"))
+                    for col, (label, value) in zip(bank_cols2, bank_pairs2):
+                        _chip(col, label, value)
+                    if ent.get("bank_address"):
+                        _chip(st, "Юр. адрес банка", ent.get("bank_address"))
+
+                # Налоги
+                if ent.get("tax_system") or ent.get("tax_rate"):
+                    _sep()
+                    _block_title("💰 Налоги")
+                    tax_pairs = [("Система налогообложения", ent.get("tax_system")), ("Ставка", ent.get("tax_rate"))]
+                    tax_cols = st.columns(2)
+                    for col, (label, value) in zip(tax_cols, tax_pairs):
+                        _chip(col, label, value)
+
+                # Владение и управление — не имеет смысла для ИП
+                if not is_ip and (ent.get("ownership_share") or ent.get("director") or ent.get("other_founders")):
+                    _sep()
+                    _block_title("👥 Владение и управление")
+                    own_pairs = [
+                        ("Доля владения", f"{ent['ownership_share']:.0f}%" if ent.get("ownership_share") else ""),
+                        ("Директор", ent.get("director")),
+                    ]
+                    own_cols = st.columns(2)
+                    for col, (label, value) in zip(own_cols, own_pairs):
+                        _chip(col, label, value)
+                    if ent.get("other_founders"):
+                        _chip(st, "Прочие учредители", ent.get("other_founders"))
+
+                # Виды деятельности (ОКВЭД)
+                if ent.get("okved_main") or ent.get("okved_additional"):
+                    _sep()
+                    _block_title("🏷️ Виды деятельности (ОКВЭД)")
+                    lines = []
+                    if ent.get("okved_main"):
+                        lines.append(f"**{_okved_label(ent['okved_main'])}**")
+                    lines.extend(_okved_label(c) for c in ent.get("okved_additional") or [])
+                    st.markdown("  \n".join(lines))
