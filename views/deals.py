@@ -1,10 +1,9 @@
-import html
-
 import pandas as pd
 import streamlit as st
 
 from data_source import load_deals, sidebar_refresh_control
 from rates_widget import render_sidebar_rates
+from theme import card, esc, kpi_card, kpi_row, page, section_title
 
 sidebar_refresh_control()
 render_sidebar_rates()
@@ -87,13 +86,6 @@ if "Дата" in df.columns:
 df["Категория"] = df[DEAL_TYPE_COL].apply(_entity) if DEAL_TYPE_COL in df.columns else OTHER
 
 
-def _esc(text):
-    """HTML-экранирование для значений, которые вставляются в сырые HTML-блоки
-    (карточки KPI, годовые бары) — это блочный HTML, а не markdown-текст, так что
-    $ там не читается как LaTeX и трюк с «\\$» не нужен, а вот < и & — небезопасны."""
-    return html.escape(str(text))
-
-
 def _fmt_pos(v):
     return f"${v:,.0f}".replace(",", " ")
 
@@ -113,23 +105,10 @@ def _signed_amount(row):
     return -abs(amt) if row.get("Категория") == INVEST else abs(amt)
 
 
-# ============================ Дизайн-система страницы ============================
-PAGE_CSS = """
+# Сегментированный pill-переключатель периода и лёгкая карточка фильтров —
+# специфичны для этой страницы, остального (hero/kpi/card/section) хватает из theme.
+EXTRA_CSS = """
 <style>
-.st-key-deals_futuristic{ --grad: linear-gradient(135deg, #6D5DF6 0%, #3B82F6 55%, #14B8A6 100%); }
-
-.st-key-deals_futuristic .tfo-hero{display:flex;align-items:center;gap:16px;margin:2px 0 26px}
-.st-key-deals_futuristic .tfo-hero-icon{
-  width:56px;height:56px;border-radius:16px;background:var(--grad);
-  display:flex;align-items:center;justify-content:center;font-size:26px;
-  box-shadow:0 10px 28px -10px rgba(59,130,246,.55);
-}
-.st-key-deals_futuristic .tfo-hero-title{
-  font-size:2.1rem;font-weight:800;letter-spacing:-.02em;line-height:1.1;
-  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
-}
-.st-key-deals_futuristic .tfo-hero-sub{color:#6b7280;font-size:.92rem;margin-top:3px}
-
 .st-key-deals_period_bar [data-testid="stCaptionContainer"]{
   text-transform:uppercase;letter-spacing:.06em;font-weight:700;font-size:.68rem;color:#9ca3af;margin-bottom:6px;
 }
@@ -143,29 +122,9 @@ PAGE_CSS = """
 .st-key-deals_period_bar [data-testid="stBaseButton-primary"]{
   border:none !important;background:var(--grad) !important;color:#fff !important;
   border-radius:10px !important;font-weight:700 !important;
-  box-shadow:0 6px 16px -6px rgba(59,130,246,.55) !important;
+  box-shadow:0 6px 16px -6px rgba(34,197,94,.55) !important;
 }
-
 .st-key-deals_filters{background:#fafbff;border:1px solid #eef0f7;border-radius:16px;padding:16px 18px 2px;margin:18px 0 22px}
-
-.tfo-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:26px}
-.tfo-kpi{
-  position:relative;background:#fff;border:1px solid #eef0f7;border-radius:16px;
-  padding:18px 18px 16px;box-shadow:0 2px 10px -4px rgba(15,23,42,.06);overflow:hidden;
-}
-.tfo-kpi::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--kpi-color)}
-.tfo-kpi-icon{
-  width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
-  background:var(--kpi-bg);font-size:16px;margin-bottom:10px;
-}
-.tfo-kpi-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#9ca3af;margin-bottom:4px}
-.tfo-kpi-value{font-size:1.5rem;font-weight:800;color:#111827;letter-spacing:-.01em}
-
-.st-key-deals_table_card{background:#fff;border:1px solid #eef0f7;border-radius:16px;padding:6px;box-shadow:0 2px 10px -4px rgba(15,23,42,.05)}
-.st-key-deals_table_card [data-testid="stDataFrame"]{border-radius:12px;overflow:hidden}
-
-.tfo-section-title{font-size:1.05rem;font-weight:800;color:#111827;margin:6px 0 14px}
-
 .tfo-yearcard{background:#fff;border:1px solid #eef0f7;border-radius:16px;padding:18px}
 .tfo-yearcard-title{font-weight:700;font-size:.92rem;margin-bottom:14px;color:#374151}
 .tfo-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
@@ -180,16 +139,8 @@ PAGE_CSS = """
 </style>
 """
 
-with st.container(key="deals_futuristic"):
-    st.markdown(PAGE_CSS, unsafe_allow_html=True)
-    st.markdown(
-        "<div class='tfo-hero'>"
-        "<div class='tfo-hero-icon'>📈</div>"
-        "<div><div class='tfo-hero-title'>Реестр сделок</div>"
-        "<div class='tfo-hero-sub'>Инвестиции, продажи и дивиденды — в одном месте</div></div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+with page("deals", "📈", "Реестр сделок", "Инвестиции, продажи и дивиденды — в одном месте"):
+    st.markdown(EXTRA_CSS, unsafe_allow_html=True)
 
     # ============================ Период ============================
     years = sorted(df["Дата"].dt.year.dropna().unique().astype(int)) if "Дата" in df.columns else []
@@ -232,25 +183,14 @@ with st.container(key="deals_futuristic"):
     def _cat_sum(cat):
         return filtered.loc[filtered["Категория"] == cat, "Сумма"].abs().sum() if "Сумма" in filtered.columns else 0
 
-    def _kpi(icon, label, value, color, bg, value_color=None):
-        vc = f"color:{value_color};" if value_color else ""
-        return (
-            f"<div class='tfo-kpi' style='--kpi-color:{color};--kpi-bg:{bg}'>"
-            f"<div class='tfo-kpi-icon'>{icon}</div>"
-            f"<div class='tfo-kpi-label'>{label}</div>"
-            f"<div class='tfo-kpi-value' style='{vc}'>{_esc(value)}</div>"
-            "</div>"
-        )
-
     profit_total = filtered[PROFIT_COL].sum() if PROFIT_COL in filtered.columns else 0
     profit_color = "#10b981" if profit_total >= 0 else "#ef4444"
-    kpi_html = "<div class='tfo-kpi-row'>" + "".join([
-        _kpi("📉", "Инвестировано", _fmt_pos(_cat_sum(INVEST)), "#f59e0b", "#fff7ed"),
-        _kpi("💰", "Продажи", _fmt_pos(_cat_sum(SALE)), "#3b82f6", "#eff6ff"),
-        _kpi("💵", "Дивиденды", _fmt_pos(_cat_sum(DIVIDEND)), "#10b981", "#ecfdf5"),
-        _kpi("🧮", "Чистая прибыль", _fmt_signed(profit_total), "#8b5cf6", "#f5f3ff", value_color=profit_color),
-    ]) + "</div>"
-    st.markdown(kpi_html, unsafe_allow_html=True)
+    kpi_row([
+        kpi_card("📉", "Инвестировано", _fmt_pos(_cat_sum(INVEST)), icon_bg="#fff7ed"),
+        kpi_card("💰", "Продажи", _fmt_pos(_cat_sum(SALE)), icon_bg="#eff6ff"),
+        kpi_card("💵", "Дивиденды", _fmt_pos(_cat_sum(DIVIDEND)), icon_bg="#ecfdf5"),
+        kpi_card("🧮", "Чистая прибыль", _fmt_signed(profit_total), value_color=profit_color, icon_bg="#f5f3ff"),
+    ])
 
     # ============================ Таблица ============================
     display = filtered.copy()
@@ -281,12 +221,12 @@ with st.container(key="deals_futuristic"):
                 styles[row.index.get_loc("Сумма")] = "color:#10b981;font-weight:600"
         return styles
 
-    with st.container(key="deals_table_card"):
+    with card("deals", "table"):
         st.dataframe(display.style.apply(_style_row, axis=1), width="stretch", hide_index=True)
 
     # ============================ По годам ============================
     st.divider()
-    st.markdown("<div class='tfo-section-title'>📊 По годам</div>", unsafe_allow_html=True)
+    section_title("📊 По годам")
 
     def _year_rows(entity):
         src = df[df["Категория"] == entity]
@@ -304,7 +244,7 @@ with st.container(key="deals_futuristic"):
         rows = _year_rows(entity)
         if not rows:
             return (
-                f"<div class='tfo-yearcard'><div class='tfo-yearcard-title'>{_esc(title)}</div>"
+                f"<div class='tfo-yearcard'><div class='tfo-yearcard-title'>{esc(title)}</div>"
                 "<div style='color:#9ca3af;font-size:.85rem'>Нет данных</div></div>"
             )
         max_v = max(r["Сумма"] for r in rows) or 1
@@ -314,14 +254,14 @@ with st.container(key="deals_futuristic"):
             f"<div class='tfo-bar-label'>{r['Год']}</div>"
             f"<div class='tfo-bar-track'><div class='tfo-bar-fill' "
             f"style='width:{r['Сумма'] / max_v * 100:.1f}%;background:{color}'></div></div>"
-            f"<div class='tfo-bar-value'>{_esc(_fmt_pos(r['Сумма']))}</div>"
+            f"<div class='tfo-bar-value'>{esc(_fmt_pos(r['Сумма']))}</div>"
             "</div>"
             for r in rows
         )
         return (
-            f"<div class='tfo-yearcard'><div class='tfo-yearcard-title'>{_esc(title)}</div>"
+            f"<div class='tfo-yearcard'><div class='tfo-yearcard-title'>{esc(title)}</div>"
             f"{bars}"
-            f"<div class='tfo-yearcard-total'><span>Итого</span><span>{_esc(_fmt_pos(total))}</span></div>"
+            f"<div class='tfo-yearcard-total'><span>Итого</span><span>{esc(_fmt_pos(total))}</span></div>"
             "</div>"
         )
 

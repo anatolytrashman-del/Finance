@@ -1,4 +1,3 @@
-import html
 import textwrap
 import uuid
 from datetime import date
@@ -12,6 +11,7 @@ from data_source import load_asset_allocation, load_balance, load_progress, side
 from events_store import load_events, save_events
 from rates_store import load_rates as load_bnb_rates
 from rates_widget import render_sidebar_rates
+from theme import GREEN_PALETTE, banner, card, kpi_card, kpi_row, page, section_title
 
 sidebar_refresh_control()
 render_sidebar_rates()
@@ -35,13 +35,6 @@ if data is None:
 capital_usd = data.get("capital_usd", pd.DataFrame())
 capital_rub = data.get("capital_rub", pd.DataFrame())
 debt = data.get("debt", pd.DataFrame())
-
-
-def _esc(text):
-    """HTML-экранирование для значений, вставляемых в сырые HTML-блоки (карточки,
-    баннер) — это блочный HTML, а не markdown-текст, так что $ там не читается
-    как LaTeX, а вот < и & — небезопасны."""
-    return html.escape(str(text))
 
 
 def _override_latest(df, live_value):
@@ -208,129 +201,49 @@ def fmt_rub_millions(v):
     return f"{v / 1_000_000:+.1f} млн"
 
 
-def _delta_row(label, delta_str, pct):
-    if delta_str is None:
-        return (
-            f"<div class='tfo-kpi-delta-row'><span class='tfo-kpi-delta-label'>{_esc(label)}</span>"
-            "<span class='tfo-kpi-delta-empty'>нет данных</span></div>"
-        )
+def _capital_delta(stats, key_delta, key_pct, fmt_delta):
+    """(значение, цвет) для строки дельты KPI-карточки, либо (None, None) —
+    тогда theme.kpi_card сам покажет «нет данных»."""
+    d = stats[key_delta]
+    if d is None:
+        return None, None
+    pct = stats[key_pct]
     positive = pct is None or pct >= 0
     color = "#16a34a" if positive else "#dc2626"
     arrow = "↑" if positive else "↓"
     pct_part = f" {arrow} {abs(pct):.1f}%" if pct is not None else ""
-    return (
-        f"<div class='tfo-kpi-delta-row'><span class='tfo-kpi-delta-label'>{_esc(label)}</span>"
-        f"<span class='tfo-kpi-delta-value' style='color:{color}'>{_esc(delta_str)}{_esc(pct_part)}</span></div>"
-    )
+    return f"{fmt_delta(d)}{pct_part}", color
 
 
-def _capital_kpi_html(icon, label, df, fmt_value, fmt_delta):
+def _capital_kpi(icon, label, df, fmt_value, fmt_delta):
     stats = capital_stats(df)
     if stats is None:
-        return (
-            f"<div class='tfo-kpi'><div class='tfo-kpi-icon'>{icon}</div>"
-            f"<div class='tfo-kpi-label'>{_esc(label)}</div>"
-            "<div style='color:#9ca3af;font-size:.9rem'>Нет данных</div></div>"
-        )
-    month = _delta_row("За месяц", fmt_delta(stats["month_delta"]) if stats["month_delta"] is not None else None, stats["month_pct"])
-    year = _delta_row("За год", fmt_delta(stats["year_delta"]) if stats["year_delta"] is not None else None, stats["year_pct"])
-    return (
-        "<div class='tfo-kpi'>"
-        f"<div class='tfo-kpi-icon'>{icon}</div>"
-        f"<div class='tfo-kpi-label'>{_esc(label)}</div>"
-        f"<div class='tfo-kpi-value'>{_esc(fmt_value(stats['latest']))}</div>"
-        f"<div class='tfo-kpi-deltas'>{month}{year}</div>"
-        "</div>"
+        return kpi_card(icon, label, "Нет данных")
+    month_val, month_color = _capital_delta(stats, "month_delta", "month_pct", fmt_delta)
+    year_val, year_color = _capital_delta(stats, "year_delta", "year_pct", fmt_delta)
+    return kpi_card(
+        icon, label, fmt_value(stats["latest"]),
+        deltas=[("За месяц", month_val, month_color), ("За год", year_val, year_color)],
     )
 
 
-GREEN_PALETTE = ["#059669", "#84CC16", "#0D9488", "#65A30D", "#10B981", "#4D7C0F", "#2DD4BF", "#3F6212"]
-
-# ============================ Дизайн-система страницы ============================
-PAGE_CSS = """
-<style>
-.st-key-dash_futuristic{ --grad: linear-gradient(135deg, #059669 0%, #22C55E 55%, #A3E635 100%); }
-
-.st-key-dash_futuristic .tfo-hero{display:flex;align-items:center;gap:16px;margin:2px 0 20px}
-.st-key-dash_futuristic .tfo-hero-icon{
-  width:56px;height:56px;border-radius:16px;background:var(--grad);
-  display:flex;align-items:center;justify-content:center;font-size:26px;
-  box-shadow:0 10px 28px -10px rgba(34,197,94,.55);
-}
-.st-key-dash_futuristic .tfo-hero-title{
-  font-size:2.1rem;font-weight:800;letter-spacing:-.02em;line-height:1.1;
-  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
-}
-.st-key-dash_futuristic .tfo-hero-sub{color:#6b7280;font-size:.92rem;margin-top:3px}
-
-.st-key-dash_futuristic .tfo-banner{
-  display:inline-block;background:var(--b-bg);color:var(--b-color);
-  padding:9px 16px;border-radius:12px;font-size:.85rem;font-weight:600;margin-bottom:22px;
-}
-
-.st-key-dash_futuristic .tfo-kpi-row{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:8px}
-.st-key-dash_futuristic .tfo-kpi{
-  position:relative;background:#fff;border:1px solid #eef0f7;border-radius:16px;
-  padding:20px 20px 18px;box-shadow:0 2px 10px -4px rgba(15,23,42,.06);overflow:hidden;
-}
-.st-key-dash_futuristic .tfo-kpi::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--grad)}
-.st-key-dash_futuristic .tfo-kpi-icon{
-  width:38px;height:38px;border-radius:11px;background:#ecfdf5;
-  display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:12px;
-}
-.st-key-dash_futuristic .tfo-kpi-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#9ca3af;margin-bottom:6px}
-.st-key-dash_futuristic .tfo-kpi-value{font-size:1.9rem;font-weight:800;color:#111827;letter-spacing:-.01em;margin-bottom:14px}
-.st-key-dash_futuristic .tfo-kpi-deltas{display:flex;flex-direction:column;gap:6px;border-top:1px solid #f1f3f9;padding-top:12px}
-.st-key-dash_futuristic .tfo-kpi-delta-row{display:flex;justify-content:space-between;font-size:.85rem}
-.st-key-dash_futuristic .tfo-kpi-delta-label{color:#9ca3af;font-weight:600}
-.st-key-dash_futuristic .tfo-kpi-delta-value{font-weight:700}
-.st-key-dash_futuristic .tfo-kpi-delta-empty{color:#c0c4cf}
-
-.st-key-dash_futuristic .tfo-section-title{font-size:1rem;font-weight:800;color:#111827;margin:2px 0 12px}
-
-.st-key-dash_futuristic [class*="st-key-dash_card_"]{
-  background:#fff;border:1px solid #eef0f7;border-radius:16px;
-  padding:18px 18px 8px;box-shadow:0 2px 10px -4px rgba(15,23,42,.05);
-}
-</style>
-"""
-
-with st.container(key="dash_futuristic"):
-    st.markdown(PAGE_CSS, unsafe_allow_html=True)
-    st.markdown(
-        "<div class='tfo-hero'>"
-        "<div class='tfo-hero-icon'>📊</div>"
-        "<div><div class='tfo-hero-title'>Дашборд капитала</div>"
-        "<div class='tfo-hero-sub'>Капитал, долговая нагрузка и доходы — в одном месте</div></div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
+with page("dash", "📊", "Дашборд капитала", "Капитал, долговая нагрузка и доходы — в одном месте"):
     if grand_total_live is not None:
-        st.markdown(
-            "<div class='tfo-banner' style='--b-bg:#ecfdf5;--b-color:#047857'>"
-            f"💱 Последняя точка «Капитал, $» и «Долговая нагрузка» пересчитана по курсу bnb.by "
-            f"на {_esc(rates_cache['fetched_at'])} — история на графиках не меняется.</div>",
-            unsafe_allow_html=True,
-        )
+        banner("💱", f"Последняя точка «Капитал, $» и «Долговая нагрузка» пересчитана по курсу "
+                     f"bnb.by на {rates_cache['fetched_at']} — история на графиках не меняется.", tone="good")
     else:
-        st.markdown(
-            "<div class='tfo-banner' style='--b-bg:#f3f4f6;--b-color:#6b7280'>"
-            "💡 Курс bnb.by ещё не обновлялся — «сегодня» показано по цифрам из таблицы. "
-            "Обнови курс в сайдбаре, чтобы включить пересчёт.</div>",
-            unsafe_allow_html=True,
-        )
+        banner("💡", "Курс bnb.by ещё не обновлялся — «сегодня» показано по цифрам из таблицы. "
+                     "Обнови курс в сайдбаре, чтобы включить пересчёт.", tone="neutral")
 
     # --- KPI-карточки ---
-    kpi_html = "<div class='tfo-kpi-row'>" + "".join([
-        _capital_kpi_html("💵", "Капитал, $", capital_usd,
-                          fmt_value=lambda v: f"${v:,.0f}".replace(",", " "),
-                          fmt_delta=fmt_usd),
-        _capital_kpi_html("💰", "Капитал, ₽", capital_rub,
-                          fmt_value=lambda v: f"{v / 1_000_000:.1f} млн",
-                          fmt_delta=fmt_rub_millions),
-    ]) + "</div>"
-    st.markdown(kpi_html, unsafe_allow_html=True)
+    kpi_row([
+        _capital_kpi("💵", "Капитал, $", capital_usd,
+                     fmt_value=lambda v: f"${v:,.0f}".replace(",", " "),
+                     fmt_delta=fmt_usd),
+        _capital_kpi("💰", "Капитал, ₽", capital_rub,
+                     fmt_value=lambda v: f"{v / 1_000_000:.1f} млн",
+                     fmt_delta=fmt_rub_millions),
+    ])
 
     # --- События-комментарии к графикам (звёздочки поверх линий) ---
     events = st.session_state["events"]
@@ -372,20 +285,20 @@ with st.container(key="dash_futuristic"):
 
     col1, col2 = st.columns(2)
     with col1:
-        with st.container(key="dash_card_capital_usd"):
-            st.markdown("<div class='tfo-section-title'>💵 Капитал, $</div>", unsafe_allow_html=True)
+        with card("dash", "capital_usd"):
+            section_title("💵 Капитал, $")
             line_chart(capital_usd, "USD", "#16A34A", chart_key="capital_usd")
     with col2:
-        with st.container(key="dash_card_capital_rub"):
-            st.markdown("<div class='tfo-section-title'>💰 Капитал, ₽</div>", unsafe_allow_html=True)
+        with card("dash", "capital_rub"):
+            section_title("💰 Капитал, ₽")
             line_chart(capital_rub, "RUB", "#1565C0")
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
     col3, col4 = st.columns(2)
     with col3:
-        with st.container(key="dash_card_growth"):
-            st.markdown("<div class='tfo-section-title'>📊 Прирост капитала по годам</div>", unsafe_allow_html=True)
+        with card("dash", "growth"):
+            section_title("📊 Прирост капитала по годам")
             if not capital_usd.empty:
                 yearly = (
                     capital_usd.assign(Год=capital_usd["date"].dt.year)
@@ -414,8 +327,8 @@ with st.container(key="dash_futuristic"):
             else:
                 st.warning("Нет данных для отображения.")
     with col4:
-        with st.container(key="dash_card_leverage"):
-            st.markdown("<div class='tfo-section-title'>⚖️ Долг / капитал, %</div>", unsafe_allow_html=True)
+        with card("dash", "leverage"):
+            section_title("⚖️ Долг / капитал, %")
             if not debt.empty and not capital_usd.empty:
                 # Мерджим по точной дате отчёта и берём помесячный ряд (1-е число +
                 # последнее показание) — иначе два отчёта за один месяц (13 и 14 июля)
@@ -446,13 +359,13 @@ with st.container(key="dash_futuristic"):
 
     col5, col6 = st.columns(2)
     with col5:
-        with st.container(key="dash_card_debt"):
-            st.markdown("<div class='tfo-section-title'>📉 Долговая нагрузка, $</div>", unsafe_allow_html=True)
+        with card("dash", "debt"):
+            section_title("📉 Долговая нагрузка, $")
             st.caption("Значения без даты в исходной таблице пропущены")
             line_chart(debt, "USD", "#C62828", chart_key="debt")
     with col6:
-        with st.container(key="dash_card_allocation"):
-            st.markdown("<div class='tfo-section-title'>🥧 Структура капитала по классам активов</div>", unsafe_allow_html=True)
+        with card("dash", "allocation"):
+            section_title("🥧 Структура капитала по классам активов")
             allocation = load_asset_allocation()
             if allocation.empty:
                 st.warning("Не нашёл помесячный срез с разбивкой по активам.")
@@ -470,10 +383,10 @@ with st.container(key="dash_futuristic"):
 
     col7, col8 = st.columns(2)
     with col7:
-        with st.container(key="dash_card_active_income"):
-            st.markdown("<div class='tfo-section-title'>💼 Активный доход, $</div>", unsafe_allow_html=True)
+        with card("dash", "active_income"):
+            section_title("💼 Активный доход, $")
             line_chart(data.get("active_income"), "USD", "#1565C0", chart_key="active_income")
     with col8:
-        with st.container(key="dash_card_passive_income"):
-            st.markdown("<div class='tfo-section-title'>🌿 Пассивный доход, $</div>", unsafe_allow_html=True)
+        with card("dash", "passive_income"):
+            section_title("🌿 Пассивный доход, $")
             line_chart(data.get("passive_income"), "USD", "#6A1B9A", chart_key="passive_income")
