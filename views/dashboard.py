@@ -221,7 +221,8 @@ COINACO_CSS = """
 .cn-big-number{font-size:2.5rem;font-weight:800;color:#17171C;letter-spacing:-.02em;margin-top:6px}
 .cn-big-number.secondary{font-size:1.7rem}
 
-.cn-pnl-row{display:flex;gap:30px;margin-top:16px;flex-wrap:wrap}
+.cn-hero-flex{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.cn-pnl-row{display:flex;gap:30px;flex-wrap:wrap}
 .cn-pnl-label{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9a9ca6}
 .cn-pnl-pct{font-size:1.1rem;font-weight:800;margin-top:3px}
 .cn-pnl-pct.pos{color:#1DBF73}
@@ -324,7 +325,7 @@ with st.container(key="dash_coinaco"):
     usd_stats = capital_stats(capital_usd)
     rub_stats = capital_stats(capital_rub)
 
-    hero_c1, hero_c2 = st.columns([1.4, 1])
+    hero_c1, hero_c2 = st.columns(2)
     with hero_c1:
         latest_usd = f"${usd_stats['latest']:,.0f}".replace(",", " ") if usd_stats else "—"
         if usd_stats:
@@ -336,11 +337,13 @@ with st.container(key="dash_coinaco"):
             m_str = m_pct = y_str = y_pct = None
         st.markdown(
             "<div class='cn-card'>"
-            "<div class='cn-label'>Капитал, $</div>"
-            f"<div class='cn-big-number'>{_esc(latest_usd)}</div>"
+            "<div class='cn-hero-flex'>"
+            "<div><div class='cn-label'>Капитал, $</div>"
+            f"<div class='cn-big-number'>{_esc(latest_usd)}</div></div>"
             "<div class='cn-pnl-row'>"
             f"{_pnl_block('За месяц', m_str, m_pct)}"
             f"{_pnl_block('За год', y_str, y_pct)}"
+            "</div>"
             "</div>"
             "</div>",
             unsafe_allow_html=True,
@@ -350,14 +353,19 @@ with st.container(key="dash_coinaco"):
         if rub_stats:
             rm_val, rm_pct = rub_stats["month_delta"], rub_stats["month_pct"]
             rm_str = fmt_rub_millions(rm_val) if rm_val is not None else None
+            ry_val, ry_pct = rub_stats["year_delta"], rub_stats["year_pct"]
+            ry_str = fmt_rub_millions(ry_val) if ry_val is not None else None
         else:
-            rm_str = rm_pct = None
+            rm_str = rm_pct = ry_str = ry_pct = None
         st.markdown(
             "<div class='cn-card'>"
-            "<div class='cn-label'>Капитал, ₽</div>"
-            f"<div class='cn-big-number secondary'>{_esc(latest_rub)}</div>"
+            "<div class='cn-hero-flex'>"
+            "<div><div class='cn-label'>Капитал, ₽</div>"
+            f"<div class='cn-big-number secondary'>{_esc(latest_rub)}</div></div>"
             "<div class='cn-pnl-row'>"
             f"{_pnl_block('За месяц', rm_str, rm_pct)}"
+            f"{_pnl_block('За год', ry_str, ry_pct)}"
+            "</div>"
             "</div>"
             "</div>",
             unsafe_allow_html=True,
@@ -438,90 +446,100 @@ with st.container(key="dash_coinaco"):
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
-    # ---------------- Риск: долг / капитал (текущее значение) — на всю ширину ----------------
-    with st.container(key="dash_coinaco_side_gauge"):
-        st.markdown("<div class='cn-side-title'>⚖️ Риск: долг / капитал</div>", unsafe_allow_html=True)
-        leverage_now, leverage_prev = None, None
-        if not debt.empty and not capital_usd.empty:
-            merged = pd.merge(capital_usd, debt, on="date", suffixes=("_cap", "_debt"))
-            merged = monthly_view(merged)
-            if not merged.empty:
-                merged["leverage"] = -merged["value_debt"] / merged["value_cap"] * 100
-                leverage_now = merged.iloc[-1]["leverage"]
-                if len(merged) > 1:
-                    leverage_prev = merged.iloc[-2]["leverage"]
-        if leverage_now is None:
-            st.markdown("<div class='cn-risk-sub' style='margin:20px 0'>Нет данных.</div>", unsafe_allow_html=True)
-        else:
-            axis_max = max(leverage_now * 1.4, 40)
-            if leverage_now < 15:
-                risk_label, risk_color = "Низкий риск", "#1DBF73"
-            elif leverage_now < 35:
-                risk_label, risk_color = "Умеренный риск", "#F5A623"
-            else:
-                risk_label, risk_color = "Высокий риск", "#E5484D"
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=leverage_now,
-                number={"suffix": "%", "font": {"size": 32, "color": "#17171C"}},
-                gauge={
-                    "axis": {"range": [0, axis_max], "visible": False},
-                    "bar": {"color": "rgba(0,0,0,0)"},
-                    "bgcolor": "rgba(0,0,0,0)",
-                    "borderwidth": 0,
-                    "steps": [
-                        {"range": [0, axis_max * 0.35], "color": "#1DBF73"},
-                        {"range": [axis_max * 0.35, axis_max * 0.7], "color": "#F5A623"},
-                        {"range": [axis_max * 0.7, axis_max], "color": "#E5484D"},
-                    ],
-                },
-                domain={"x": [0.3, 0.7], "y": [0, 1]},
-            ))
-            fig.update_layout(margin=dict(l=20, r=20, t=10, b=0), height=200, paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-            st.markdown(f"<div class='cn-risk-label' style='color:{risk_color}'>{_esc(risk_label)}</div>", unsafe_allow_html=True)
-            if leverage_prev is not None:
-                st.markdown(
-                    f"<div class='cn-risk-sub'>Месяц назад: {leverage_prev:.1f}%</div>",
-                    unsafe_allow_html=True,
-                )
+    # ---------------- Риск: долг/капитал + Прирост по годам — рядом, компактно ----------------
+    risk_col, movers_col = st.columns(2)
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
-    # ---------------- Прирост капитала по годам — на всю ширину ----------------
-    with st.container(key="dash_coinaco_side_movers"):
-        st.markdown("<div class='cn-side-title'>📊 Прирост по годам</div>", unsafe_allow_html=True)
-        if capital_usd.empty:
-            st.markdown("<div class='cn-risk-sub'>Нет данных.</div>", unsafe_allow_html=True)
-        else:
-            yearly = (
-                capital_usd.assign(Год=capital_usd["date"].dt.year)
-                .groupby("Год", as_index=False)["value"].last()
-            )
-            yearly["Прирост"] = yearly["value"].diff()
-            yearly["Прирост_pct"] = yearly["value"].pct_change() * 100
-            yearly = yearly.dropna(subset=["Прирост"]).sort_values("Прирост_pct", ascending=False)
-            if yearly.empty:
-                st.markdown("<div class='cn-risk-sub'>Недостаточно данных.</div>", unsafe_allow_html=True)
+    with risk_col:
+        with st.container(key="dash_coinaco_side_gauge"):
+            st.markdown("<div class='cn-side-title'>⚖️ Риск: долг / капитал</div>", unsafe_allow_html=True)
+            leverage_now, leverage_prev = None, None
+            if not debt.empty and not capital_usd.empty:
+                merged = pd.merge(capital_usd, debt, on="date", suffixes=("_cap", "_debt"))
+                merged = monthly_view(merged)
+                if not merged.empty:
+                    merged["leverage"] = -merged["value_debt"] / merged["value_cap"] * 100
+                    leverage_now = merged.iloc[-1]["leverage"]
+                    if len(merged) > 1:
+                        leverage_prev = merged.iloc[-2]["leverage"]
+            if leverage_now is None:
+                st.markdown("<div class='cn-risk-sub' style='margin:20px 0'>Нет данных.</div>", unsafe_allow_html=True)
             else:
-                rows_html = ""
-                for _, r in yearly.iterrows():
-                    pos = r["Прирост"] >= 0
-                    cls = "pos" if pos else "neg"
-                    arrow = "↗" if pos else "↘"
-                    rows_html += (
-                        "<div class='cn-mover-row'>"
-                        "<div class='cn-mover-left'>"
-                        f"<div class='cn-mover-icon'>{int(r['Год']) % 100}</div>"
-                        f"<div class='cn-mover-name'>{int(r['Год'])}</div>"
-                        "</div>"
-                        "<div class='cn-mover-value'>"
-                        f"<div class='cn-mover-amount'>{_esc(_fmt_point_value(r['Прирост'], 'USD'))}</div>"
-                        f"<div class='cn-mover-pct {cls}'>{arrow} {abs(r['Прирост_pct']):.1f}%</div>"
-                        "</div>"
-                        "</div>"
+                axis_max = max(leverage_now * 1.4, 40)
+                if leverage_now < 15:
+                    risk_label, risk_color = "Низкий риск", "#1DBF73"
+                elif leverage_now < 35:
+                    risk_label, risk_color = "Умеренный риск", "#F5A623"
+                else:
+                    risk_label, risk_color = "Высокий риск", "#E5484D"
+
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=leverage_now,
+                    number={"suffix": "%", "font": {"size": 22, "color": "#17171C"}},
+                    gauge={
+                        "axis": {"range": [0, axis_max], "visible": False},
+                        "bar": {"color": "rgba(0,0,0,0)"},
+                        "bgcolor": "rgba(0,0,0,0)",
+                        "borderwidth": 0,
+                        "steps": [
+                            {"range": [0, axis_max * 0.35], "color": "#1DBF73"},
+                            {"range": [axis_max * 0.35, axis_max * 0.7], "color": "#F5A623"},
+                            {"range": [axis_max * 0.7, axis_max], "color": "#E5484D"},
+                        ],
+                        # Стрелка-указатель на середину «зелёной» (безопасной) зоны —
+                        # целевой ориентир по риску, не текущее значение (его показывают
+                        # дуга и число). Родная часть polar-координат гейджа, поэтому
+                        # масштабируется вместе с ним корректно при любой ширине карточки.
+                        "threshold": {
+                            "line": {"color": "#17171C", "width": 4},
+                            "thickness": 0.9,
+                            "value": axis_max * 0.175,
+                        },
+                    },
+                ))
+                fig.update_layout(margin=dict(l=10, r=10, t=6, b=0), height=100, paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                st.markdown(f"<div class='cn-risk-label' style='color:{risk_color}'>{_esc(risk_label)}</div>", unsafe_allow_html=True)
+                if leverage_prev is not None:
+                    st.markdown(
+                        f"<div class='cn-risk-sub'>Месяц назад: {leverage_prev:.1f}%</div>",
+                        unsafe_allow_html=True,
                     )
-                st.markdown(rows_html, unsafe_allow_html=True)
+
+    with movers_col:
+        with st.container(key="dash_coinaco_side_movers"):
+            st.markdown("<div class='cn-side-title'>📊 Прирост по годам</div>", unsafe_allow_html=True)
+            if capital_usd.empty:
+                st.markdown("<div class='cn-risk-sub'>Нет данных.</div>", unsafe_allow_html=True)
+            else:
+                yearly = (
+                    capital_usd.assign(Год=capital_usd["date"].dt.year)
+                    .groupby("Год", as_index=False)["value"].last()
+                )
+                yearly["Прирост"] = yearly["value"].diff()
+                yearly["Прирост_pct"] = yearly["value"].pct_change() * 100
+                yearly = yearly.dropna(subset=["Прирост"]).sort_values("Прирост_pct", ascending=False)
+                if yearly.empty:
+                    st.markdown("<div class='cn-risk-sub'>Недостаточно данных.</div>", unsafe_allow_html=True)
+                else:
+                    rows_html = ""
+                    for _, r in yearly.iterrows():
+                        pos = r["Прирост"] >= 0
+                        cls = "pos" if pos else "neg"
+                        arrow = "↗" if pos else "↘"
+                        rows_html += (
+                            "<div class='cn-mover-row'>"
+                            "<div class='cn-mover-left'>"
+                            f"<div class='cn-mover-icon'>{int(r['Год']) % 100}</div>"
+                            f"<div class='cn-mover-name'>{int(r['Год'])}</div>"
+                            "</div>"
+                            "<div class='cn-mover-value'>"
+                            f"<div class='cn-mover-amount'>{_esc(_fmt_point_value(r['Прирост'], 'USD'))}</div>"
+                            f"<div class='cn-mover-pct {cls}'>{arrow} {abs(r['Прирост_pct']):.1f}%</div>"
+                            "</div>"
+                            "</div>"
+                        )
+                    st.markdown(rows_html, unsafe_allow_html=True)
 
     st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
 
