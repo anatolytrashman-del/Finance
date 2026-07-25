@@ -166,10 +166,18 @@ def kpi_row(cards_html):
 
 
 def pill(text, colors=NEUTRAL):
+    """Пилюля — рендерится как <span>, а не <div>: несколько пилюль часто
+    склеиваются в одну markdown-строку (см. kpi_row-подобные хедеры), и когда
+    такая строка из голых <span>-тегов содержит $, Streamlit ломает её при
+    парсинге (несколько инлайн-тегов подряд трактуются иначе, чем один) —
+    поэтому здесь, в отличие от esc()/блочных карточек, $ ещё и
+    бэкслеш-экранируется вручную (проверено вживую: без этого верстка
+    рассыпается ровно в multi-pill-конкатенации с $, но не в одиночном span)."""
     bg, color = colors
+    safe = esc(text).replace("$", r"\$")
     return (
         f"<span style='display:inline-block;background:{bg};color:{color};"
         "padding:4px 14px;border-radius:16px;font-size:0.8rem;font-weight:600;"
         "letter-spacing:.01em;box-shadow:0 1px 2px rgba(0,0,0,.06);"
-        f"margin:2px 6px 2px 0'>{esc(text)}</span>"
+        f"margin:2px 6px 2px 0'>{safe}</span>"
     )
