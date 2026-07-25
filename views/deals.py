@@ -1,7 +1,6 @@
 import html
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from data_source import load_deals, sidebar_refresh_control
@@ -115,6 +114,22 @@ def _signed_amount(row):
     return -abs(amt) if row.get("Категория") == INVEST else abs(amt)
 
 
+def _deal_label(row):
+    """Заголовок строки в списке «Сделки» — «Покупка»/«Продажа» сами по себе не
+    говорят, о какой сделке речь, поэтому дополняем конкретикой: объект,
+    назначение или вид актива, что найдётся первым."""
+    deal_type = str(row.get(DEAL_TYPE_COL) or "").strip()
+    detail = None
+    for col in ("Объект", "Назначение", ASSET_COL):
+        v = row.get(col)
+        if v is not None and str(v).strip() and str(v).strip().lower() != "nan":
+            detail = str(v).strip()
+            break
+    if deal_type and detail and detail.lower() != deal_type.lower():
+        return f"{deal_type} · {detail}"
+    return detail or deal_type or "Сделка"
+
+
 # ============================ Bankio-style дизайн (эксперимент) ============================
 # Полностью самостоятельная вёрстка под референс-скриншот (пастельные заливные
 # карточки, pill-кнопки, гладкие графики) — не завязана на общий theme.py, поэтому
@@ -176,7 +191,7 @@ BANKIO_CSS = """
   justify-content:center;font-size:16px;flex-shrink:0;
 }
 .bk-tx-text{min-width:0}
-.bk-tx-name{font-weight:700;color:#12121c;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.bk-tx-name{font-weight:700;color:#12121c;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
 .bk-tx-date{color:#7c828e;font-size:.72rem}
 .bk-tx-amount{font-weight:700;font-size:.85rem;flex-shrink:0;padding-left:10px}
 .bk-tx-amount.pos{color:#1b8f5a}
@@ -188,8 +203,6 @@ BANKIO_CSS = """
 .bk-minibar-labels{display:flex;gap:7px;margin-top:7px}
 .bk-minibar-labels span{flex:1;text-align:center;font-size:.7rem;color:#5b6472;font-weight:600}
 
-.st-key-deals_bankio_area{background:#E4EDFC;border-radius:26px;padding:22px 22px 6px}
-.st-key-deals_bankio_gauge{background:#DCEEE3;border-radius:26px;padding:22px 22px 10px}
 .st-key-deals_bankio_table{background:#fff;border-radius:26px;padding:20px}
 </style>
 """
@@ -248,10 +261,44 @@ with st.container(key="deals_bankio"):
 
     invested = _cat_sum(INVEST)
     sold_sum = _cat_sum(SALE)
-    dividends = _cat_sum(DIVIDEND)
     profit_total = filtered[PROFIT_COL].sum() if PROFIT_COL in filtered.columns else 0
 
-    # ---------------- Row 1: Портфель / Инвестировано по годам / Сделки ----------------
+    # ---------------- Row 1: три отдельные карточки-цифры ----------------
+    period_label = "за всё время" if period == "Все время" else f"за {period}"
+    profit_color = "#1b8f5a" if profit_total >= 0 else "#c0392b"
+
+    r1c1, r1c2, r1c3 = st.columns(3)
+    with r1c1:
+        st.markdown(
+            "<div class='bk-card bk-card-lavender'>"
+            "<div class='bk-card-title'>Чистая прибыль</div>"
+            f"<div class='bk-card-sub'>{_esc(period_label)}</div>"
+            f"<div class='bk-big-number' style='color:{profit_color}'>{_esc(_fmt_signed(profit_total))}</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    with r1c2:
+        st.markdown(
+            "<div class='bk-card bk-card-blue-strong'>"
+            "<div class='bk-card-title'>Инвестировано</div>"
+            f"<div class='bk-card-sub'>{_esc(period_label)}</div>"
+            f"<div class='bk-big-number'>{_esc(_fmt_pos(invested))}</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    with r1c3:
+        st.markdown(
+            "<div class='bk-card bk-card-green'>"
+            "<div class='bk-card-title'>Продано</div>"
+            f"<div class='bk-card-sub'>{_esc(period_label)}</div>"
+            f"<div class='bk-big-number'>{_esc(_fmt_pos(sold_sum))}</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # ---------------- Row 2: Инвестировано по годам / Сделки ----------------
     def _year_rows(entity, src_df):
         src = src_df[src_df["Категория"] == entity]
         if selected_types and ASSET_COL in src.columns:
@@ -264,24 +311,9 @@ with st.container(key="deals_bankio"):
         g["Год"] = g["Год"].astype(int)
         return g.sort_values("Год").to_dict("records")
 
-    r1c1, r1c2, r1c3 = st.columns([1, 1, 1.2])
+    r2c1, r2c2 = st.columns([1, 1.2])
 
-    with r1c1:
-        period_label = "за всё время" if period == "Все время" else f"за {period}"
-        st.markdown(
-            "<div class='bk-card bk-card-lavender'>"
-            "<div class='bk-card-title'>Портфель</div>"
-            f"<div class='bk-card-sub'>Чистая прибыль {_esc(period_label)}</div>"
-            f"<div class='bk-big-number'>{_esc(_fmt_signed(profit_total))}</div>"
-            "<div style='display:flex;gap:8px;margin-top:12px;flex-wrap:wrap'>"
-            f"<span class='bk-pill'>📉 {_esc(_fmt_pos(invested))}</span>"
-            f"<span class='bk-pill'>💰 {_esc(_fmt_pos(sold_sum))}</span>"
-            "</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-    with r1c2:
+    with r2c1:
         inv_years = _year_rows(INVEST, df)
         max_v = max((r["Сумма"] for r in inv_years), default=0) or 1
         bars_html = "".join(
@@ -294,7 +326,7 @@ with st.container(key="deals_bankio"):
         no_bars_html = "<div style='color:#7c828e;font-size:.8rem'>Нет данных</div>"
         st.markdown(
             "<div class='bk-card bk-card-blue-strong'>"
-            "<div class='bk-card-title'>Инвестировано</div>"
+            "<div class='bk-card-title'>Инвестировано по годам</div>"
             f"<div class='bk-card-sub'>{_esc(_fmt_pos(total_invested_all))} всего</div>"
             f"<div class='bk-minibar-row'>{bars_html or no_bars_html}</div>"
             f"<div class='bk-minibar-labels'>{labels_html}</div>"
@@ -302,13 +334,13 @@ with st.container(key="deals_bankio"):
             unsafe_allow_html=True,
         )
 
-    with r1c3:
+    with r2c2:
         recent = filtered.sort_values("Дата", ascending=False).head(5) if "Дата" in filtered.columns else filtered.head(5)
         rows_html = []
         for _, row in recent.iterrows():
             cat = row.get("Категория", OTHER)
             icon = CATEGORY_ICONS.get(cat, "📄")
-            name = row.get(DEAL_TYPE_COL) or cat
+            name = _deal_label(row)
             date_str = row["Дата"].strftime("%d.%m.%Y") if pd.notna(row.get("Дата")) else ""
             signed = _signed_amount(row)
             amount_str = _fmt_signed(signed) if pd.notna(signed) else "—"
@@ -332,82 +364,6 @@ with st.container(key="deals_bankio"):
             "</div>",
             unsafe_allow_html=True,
         )
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
-    # ---------------- Row 2: Динамика инвестиций / Доходность ----------------
-    r2c1, r2c2 = st.columns([2, 1])
-
-    with r2c1:
-        with st.container(key="deals_bankio_area"):
-            st.markdown("<div class='bk-card-title'>Динамика инвестиций</div>", unsafe_allow_html=True)
-            src = df[df["Категория"] == INVEST]
-            if selected_types and ASSET_COL in src.columns:
-                src = src[src[ASSET_COL].isin(selected_types)]
-            if src.empty or "Дата" not in src.columns:
-                st.markdown("<div class='bk-card-sub' style='margin:20px 0'>Нет данных для графика.</div>", unsafe_allow_html=True)
-            else:
-                monthly = (
-                    src.assign(month=src["Дата"].dt.to_period("M").dt.to_timestamp())
-                    .groupby("month", as_index=False)["Сумма"].sum()
-                )
-                monthly["Сумма"] = monthly["Сумма"].abs()
-                monthly = monthly.sort_values("month")
-                peak_idx = monthly["Сумма"].idxmax()
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=monthly["month"], y=monthly["Сумма"], mode="lines",
-                    line=dict(color="#12121c", width=2.5, shape="spline"),
-                    fill="tozeroy", fillcolor="rgba(91,141,239,0.35)",
-                    hovertemplate="%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>",
-                ))
-                fig.add_trace(go.Scatter(
-                    x=[monthly.loc[peak_idx, "month"]], y=[monthly.loc[peak_idx, "Сумма"]],
-                    mode="markers", marker=dict(size=11, color="white", line=dict(color="#12121c", width=3)),
-                    showlegend=False, hoverinfo="skip",
-                ))
-                fig.update_layout(
-                    margin=dict(l=0, r=0, t=10, b=0), height=250,
-                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                    xaxis=dict(showgrid=False, tickfont=dict(size=11, color="#7c828e")),
-                    yaxis=dict(showgrid=False, tickfont=dict(size=11, color="#7c828e")),
-                    showlegend=False,
-                )
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-    with r2c2:
-        with st.container(key="deals_bankio_gauge"):
-            st.markdown("<div class='bk-card-title'>Доходность</div>", unsafe_allow_html=True)
-            yield_pct = (dividends / invested * 100) if invested else 0
-            label = "Отличная" if yield_pct >= 15 else ("Средняя" if yield_pct >= 5 else "Низкая")
-            label_color = "#1b8f5a" if yield_pct >= 15 else ("#b8860b" if yield_pct >= 5 else "#c0392b")
-            axis_max = max(yield_pct * 1.3, 20)
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=yield_pct,
-                number={"suffix": "%", "font": {"size": 34, "color": "#12121c"}},
-                gauge={
-                    "axis": {"range": [0, axis_max], "visible": False},
-                    "bar": {"color": "rgba(0,0,0,0)"},
-                    "bgcolor": "rgba(0,0,0,0)",
-                    "borderwidth": 0,
-                    "steps": [
-                        {"range": [0, axis_max * 0.35], "color": "#F0716C"},
-                        {"range": [axis_max * 0.35, axis_max * 0.7], "color": "#FFC65C"},
-                        {"range": [axis_max * 0.7, axis_max], "color": "#38C793"},
-                    ],
-                },
-            ))
-            fig.update_layout(
-                margin=dict(l=20, r=20, t=10, b=0), height=190,
-                paper_bgcolor="rgba(0,0,0,0)",
-            )
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-            st.markdown(
-                f"<div style='text-align:center;font-weight:700;color:{label_color};margin-top:-8px'>{_esc(label)}</div>"
-                "<div style='text-align:center;color:#7c828e;font-size:.75rem;margin-top:2px'>Дивиденды / инвестировано</div>",
-                unsafe_allow_html=True,
-            )
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
