@@ -126,6 +126,23 @@ def section_title(text):
     st.markdown(f"<div class='tfo-section-title'>{esc(text)}</div>", unsafe_allow_html=True)
 
 
+def chip(col, label, value, icon=""):
+    """Компактное поле «подпись сверху / значение снизу» в конкретной
+    колонке — не рисуется вовсе, если значение пустое (чтобы карточка не
+    пестрела прочерками по незаполненным полям)."""
+    if not value:
+        return
+    prefix = f"{icon} " if icon else ""
+    col.markdown(
+        "<div style='margin-bottom:12px'>"
+        f"<div style='font-size:0.72rem;font-weight:600;color:#8a8fa3;"
+        f"text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px'>{prefix}{esc(label)}</div>"
+        f"<div style='font-size:0.95rem;font-weight:600;color:#1a1a2e'>{esc(value)}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def banner(icon, text, tone="good"):
     bg, color = BANNER_GOOD if tone == "good" else BANNER_NEUTRAL
     st.markdown(
