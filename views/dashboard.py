@@ -1,9 +1,11 @@
+import html
 import textwrap
 import uuid
 from datetime import date
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from balance_live import recalc_live_totals
@@ -11,7 +13,6 @@ from data_source import load_asset_allocation, load_balance, load_progress, side
 from events_store import load_events, save_events
 from rates_store import load_rates as load_bnb_rates
 from rates_widget import render_sidebar_rates
-from theme import GREEN_PALETTE, banner, card, kpi_card, kpi_row, page, section_title
 
 sidebar_refresh_control()
 render_sidebar_rates()
@@ -88,13 +89,10 @@ def _fmt_point_value(v, unit="USD"):
 def _overlay_events(fig, mv, chart_key):
     """Ставит маркеры-точки событий на линию (привязка к ближайшему замеру).
 
-    Несколько событий, попавших на одну и ту же точку графика (например,
-    два события через день — оба ближе всего к одному и тому же месячному
-    замеру), объединяются в ОДИН маркер с одним всплывающим окном — иначе
-    точки рисуются друг на друге и наведение показывает только верхнюю
-    (тот же приём, что группировка объектов в одном доме на карте
-    в real_estate.py). В тултипе показывается и значение графика в этой
-    точке, не только текст события.
+    Несколько событий, попавших на одну и ту же точку графика, объединяются
+    в ОДИН маркер с одним всплывающим окном — иначе точки рисуются друг на
+    друге и наведение показывает только верхнюю. В тултипе показывается и
+    значение графика в этой точке, не только текст события.
 
     События вне диапазона ряда (± ~месяц) пропускаются."""
     events = st.session_state.get("events") or []
@@ -124,7 +122,6 @@ def _overlay_events(fig, mv, chart_key):
         header = f"<b>{point_date:%d.%m.%Y} · {_fmt_point_value(point_value, 'USD')}</b>"
         blocks = []
         for d, comment in items:
-            # переносим длинный комментарий по словам, чтобы тултип не обрезался
             wrapped = "<br>".join(textwrap.wrap(comment, width=44)) or "—"
             blocks.append(f"<i>{d:%d.%m.%Y}</i><br>{wrapped}")
         texts.append(header + "<br><br>" + "<br><br>".join(blocks))
@@ -133,7 +130,7 @@ def _overlay_events(fig, mv, chart_key):
     if xs:
         fig.add_scatter(
             x=xs, y=ys, mode="markers", name="События",
-            marker=dict(symbol="circle", size=12, color="#EF6C00",
+            marker=dict(symbol="circle", size=12, color="#F0532D",
                         line=dict(color="white", width=1.5)),
             customdata=texts, hovertemplate="📌 %{customdata}<extra></extra>",
             hoverlabel=dict(align="left"),
@@ -158,9 +155,11 @@ def line_chart(df, y_label, color, chart_key=None):
         xaxis_title=None,
         yaxis_title=y_label,
         margin=dict(l=10, r=10, t=10, b=10),
-        height=320,
+        height=280,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 def capital_stats(df):
@@ -201,192 +200,389 @@ def fmt_rub_millions(v):
     return f"{v / 1_000_000:+.1f} млн"
 
 
-def _capital_delta(stats, key_delta, key_pct, fmt_delta):
-    """(значение, цвет) для строки дельты KPI-карточки, либо (None, None) —
-    тогда theme.kpi_card сам покажет «нет данных»."""
-    d = stats[key_delta]
-    if d is None:
-        return None, None
-    pct = stats[key_pct]
+def _esc(text):
+    """HTML-экранирование для значений, вставляемых в сырые HTML-блоки —
+    это блочный HTML, а не markdown-текст, так что $ там не читается как
+    LaTeX, а вот < и & — небезопасны."""
+    return html.escape(str(text))
+
+
+# ============================ Coinaco-style дизайн (эксперимент №2) ============================
+# Самостоятельная вёрстка под второй референс-скриншот — не завязана на theme.py,
+# откат = один `git revert` этого коммита, без побочных эффектов на другие страницы.
+COINACO_CSS = """
+<style>
+.st-key-dash_coinaco{background:#EFEDE8;border-radius:28px;padding:26px 26px 24px}
+.st-key-dash_coinaco .cn-hero-title{font-size:1.9rem;font-weight:700;color:#17171C;letter-spacing:-.01em}
+.st-key-dash_coinaco .cn-hero-sub{color:#8b8d98;font-size:.88rem;margin-top:2px}
+
+.cn-banner{display:inline-block;background:#FDEDE8;color:#B8441F;padding:8px 16px;
+  border-radius:12px;font-size:.82rem;font-weight:600;margin:14px 0 2px}
+.cn-banner.neutral{background:#F1F1F3;color:#6b6f7a}
+
+.cn-card{background:#fff;border-radius:20px;padding:22px;box-sizing:border-box;height:100%}
+.cn-label{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9a9ca6}
+.cn-big-number{font-size:2.5rem;font-weight:800;color:#17171C;letter-spacing:-.02em;margin-top:6px}
+.cn-big-number.secondary{font-size:1.7rem}
+
+.cn-pnl-row{display:flex;gap:30px;margin-top:16px;flex-wrap:wrap}
+.cn-pnl-label{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9a9ca6}
+.cn-pnl-pct{font-size:1.1rem;font-weight:800;margin-top:3px}
+.cn-pnl-pct.pos{color:#1DBF73}
+.cn-pnl-pct.neg{color:#E5484D}
+.cn-pnl-pct.flat{color:#9a9ca6}
+.cn-pnl-amt{font-size:.76rem;color:#9a9ca6;margin-top:1px}
+
+.cn-asset-row{display:flex;gap:14px;overflow-x:auto;padding-bottom:2px}
+.cn-asset-card{background:#fff;border-radius:18px;padding:16px 18px;min-width:170px;flex:1 0 170px}
+.cn-asset-head{display:flex;align-items:center;gap:10px}
+.cn-asset-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:15px;background:#F1EFEA;flex-shrink:0}
+.cn-asset-name{font-weight:700;color:#17171C;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cn-asset-value{font-size:1.3rem;font-weight:800;color:#17171C;margin-top:10px}
+.cn-asset-pct{font-size:.76rem;font-weight:700;color:#1DBF73;margin-top:2px}
+
+.cn-tx-left{display:flex;align-items:center;gap:12px;padding:6px 0}
+.cn-tx-icon{width:36px;height:36px;border-radius:50%;background:#F1EFEA;display:flex;
+  align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.cn-tx-name{font-weight:700;color:#17171C;font-size:.85rem}
+.cn-tx-sub{color:#9a9ca6;font-size:.72rem;margin-top:1px}
+.cn-tx-date{color:#9a9ca6;font-size:.8rem;padding:14px 0;text-align:right}
+
+.cn-side-title{font-weight:700;font-size:1rem;color:#17171C;margin-bottom:14px}
+
+.cn-mover-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1EFEA}
+.cn-mover-row:last-child{border-bottom:none}
+.cn-mover-left{display:flex;align-items:center;gap:10px}
+.cn-mover-icon{width:30px;height:30px;border-radius:50%;background:#F1EFEA;display:flex;
+  align-items:center;justify-content:center;font-size:.76rem;font-weight:800;color:#17171C}
+.cn-mover-name{font-weight:700;font-size:.83rem;color:#17171C}
+.cn-mover-value{text-align:right}
+.cn-mover-amount{font-weight:700;font-size:.83rem;color:#17171C}
+.cn-mover-pct{font-size:.76rem;font-weight:700}
+.cn-mover-pct.pos{color:#1DBF73}
+.cn-mover-pct.neg{color:#E5484D}
+
+.cn-risk-label{text-align:center;font-weight:700;font-size:.95rem;margin-top:-6px}
+.cn-risk-sub{text-align:center;color:#9a9ca6;font-size:.75rem;margin-top:2px}
+
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_chart_"]{background:#fff;border-radius:20px;padding:20px 20px 6px}
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_side_"]{background:#fff;border-radius:20px;padding:20px;margin-bottom:16px}
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_events_"]{background:#fff;border-radius:20px;padding:6px 20px 4px;margin-bottom:16px}
+</style>
+"""
+
+ASSET_ICONS = {
+    "недвижимость": "🏠", "акци": "📈", "облигаци": "📄", "займ": "🤝",
+    "искусств": "🎨", "бизнес": "🏢", "наличн": "💵", "крипт": "🪙",
+    "счет": "🏦", "счёт": "🏦", "возврат": "↩️",
+}
+
+
+def _asset_icon(name):
+    low = str(name).lower()
+    for key, icon in ASSET_ICONS.items():
+        if key in low:
+            return icon
+    return "💠"
+
+
+def _pnl_block(label, delta_str, pct):
+    if delta_str is None:
+        return (
+            f"<div><div class='cn-pnl-label'>{_esc(label)}</div>"
+            "<div class='cn-pnl-pct flat'>нет данных</div></div>"
+        )
     positive = pct is None or pct >= 0
-    color = "#16a34a" if positive else "#dc2626"
+    cls = "pos" if positive else "neg"
     arrow = "↑" if positive else "↓"
-    pct_part = f" {arrow} {abs(pct):.1f}%" if pct is not None else ""
-    return f"{fmt_delta(d)}{pct_part}", color
-
-
-def _capital_kpi(icon, label, df, fmt_value, fmt_delta):
-    stats = capital_stats(df)
-    if stats is None:
-        return kpi_card(icon, label, "Нет данных")
-    month_val, month_color = _capital_delta(stats, "month_delta", "month_pct", fmt_delta)
-    year_val, year_color = _capital_delta(stats, "year_delta", "year_pct", fmt_delta)
-    return kpi_card(
-        icon, label, fmt_value(stats["latest"]),
-        deltas=[("За месяц", month_val, month_color), ("За год", year_val, year_color)],
+    pct_str = f"{arrow} {abs(pct):.1f}%" if pct is not None else ""
+    return (
+        f"<div><div class='cn-pnl-label'>{_esc(label)}</div>"
+        f"<div class='cn-pnl-pct {cls}'>{_esc(pct_str)}</div>"
+        f"<div class='cn-pnl-amt'>{_esc(delta_str)}</div></div>"
     )
 
 
-with page("dash", "📊", "Дашборд капитала", "Капитал, долговая нагрузка и доходы — в одном месте"):
+with st.container(key="dash_coinaco"):
+    st.markdown(COINACO_CSS, unsafe_allow_html=True)
+    st.markdown(
+        "<div class='cn-hero-title'>Дашборд капитала</div>"
+        "<div class='cn-hero-sub'>Капитал, долговая нагрузка и доходы — в одном месте</div>",
+        unsafe_allow_html=True,
+    )
     if grand_total_live is not None:
-        banner("💱", f"Последняя точка «Капитал, $» и «Долговая нагрузка» пересчитана по курсу "
-                     f"bnb.by на {rates_cache['fetched_at']} — история на графиках не меняется.", tone="good")
+        st.markdown(
+            f"<div class='cn-banner'>💱 «Капитал, $» и «Долговая нагрузка» пересчитаны по курсу "
+            f"bnb.by на {_esc(rates_cache['fetched_at'])}</div>",
+            unsafe_allow_html=True,
+        )
     else:
-        banner("💡", "Курс bnb.by ещё не обновлялся — «сегодня» показано по цифрам из таблицы. "
-                     "Обнови курс в сайдбаре, чтобы включить пересчёт.", tone="neutral")
+        st.markdown(
+            "<div class='cn-banner neutral'>💡 Курс bnb.by ещё не обновлялся — «сегодня» "
+            "показано по цифрам из таблицы.</div>",
+            unsafe_allow_html=True,
+        )
 
-    # --- KPI-карточки ---
-    kpi_row([
-        _capital_kpi("💵", "Капитал, $", capital_usd,
-                     fmt_value=lambda v: f"${v:,.0f}".replace(",", " "),
-                     fmt_delta=fmt_usd),
-        _capital_kpi("💰", "Капитал, ₽", capital_rub,
-                     fmt_value=lambda v: f"{v / 1_000_000:.1f} млн",
-                     fmt_delta=fmt_rub_millions),
-    ])
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-    # --- События-комментарии к графикам (звёздочки поверх линий) ---
-    events = st.session_state["events"]
-    with st.expander(f"📌 События на графиках ({len(events)})"):
-        st.caption("Отмечают особые решения (напр. «убрал из оценки технику и искусство»). "
-                   "Появляются звёздочкой на выбранных графиках, при наведении — дата и текст.")
-        with st.form("add_event", clear_on_submit=True):
-            ec1, ec2 = st.columns([1, 3])
-            ev_date = ec1.date_input("Дата", value=date.today(), format="DD.MM.YYYY")
-            ev_comment = ec2.text_input("Комментарий")
-            ev_charts = st.multiselect(
-                "На каких графиках показать",
-                options=list(CHART_OPTIONS), format_func=lambda k: CHART_OPTIONS[k],
-                default=["capital_usd"],
-            )
-            if st.form_submit_button("Добавить событие"):
-                if ev_comment.strip() and ev_charts:
-                    events.append({
-                        "id": str(uuid.uuid4()), "date": ev_date.isoformat(),
-                        "comment": ev_comment.strip(), "charts": ev_charts,
-                    })
-                    save_events(events)
-                    st.rerun()
-                else:
-                    st.warning("Заполни комментарий и выбери хотя бы один график.")
+    main_col, side_col = st.columns([2.1, 1])
 
-        if events:
-            for ev in sorted(events, key=lambda e: e.get("date", "")):
-                r1, r2, r3, r4 = st.columns([2, 6, 3, 1])
-                r1.write(pd.to_datetime(ev["date"]).strftime("%d.%m.%Y"))
-                r2.write(ev.get("comment", ""))
-                r3.caption(", ".join(CHART_OPTIONS.get(k, k) for k in ev.get("charts", [])))
-                if r4.button("🗑", key=f"ev_del_{ev['id']}", help="Удалить событие"):
-                    st.session_state["events"] = [x for x in events if x["id"] != ev["id"]]
-                    save_events(st.session_state["events"])
-                    st.rerun()
+    with main_col:
+        # ---------------- Hero: Капитал $ (основной) + Капитал ₽ (компактно) ----------------
+        usd_stats = capital_stats(capital_usd)
+        rub_stats = capital_stats(capital_rub)
 
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        with card("dash", "capital_usd"):
-            section_title("💵 Капитал, $")
-            line_chart(capital_usd, "USD", "#16A34A", chart_key="capital_usd")
-    with col2:
-        with card("dash", "capital_rub"):
-            section_title("💰 Капитал, ₽")
-            line_chart(capital_rub, "RUB", "#1565C0")
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
-    col3, col4 = st.columns(2)
-    with col3:
-        with card("dash", "growth"):
-            section_title("📊 Прирост капитала по годам")
-            if not capital_usd.empty:
-                yearly = (
-                    capital_usd.assign(Год=capital_usd["date"].dt.year)
-                    .groupby("Год", as_index=False)["value"]
-                    .last()
-                )
-                yearly["Прирост"] = yearly["value"].diff()
-                yearly = yearly.dropna(subset=["Прирост"])
-                if yearly.empty:
-                    st.warning("Недостаточно данных для расчёта прироста.")
-                else:
-                    fig = px.bar(yearly, x="Год", y="Прирост")
-                    fig.update_traces(
-                        marker_color=["#16A34A" if v >= 0 else "#C62828" for v in yearly["Прирост"]],
-                        customdata=yearly["Прирост"].apply(lambda v: _fmt_point_value(v, "USD")),
-                        hovertemplate="<b>%{x}</b><br>%{customdata}<extra></extra>",
-                    )
-                    fig.update_xaxes(type="category")
-                    fig.update_layout(
-                        xaxis_title=None,
-                        yaxis_title="USD",
-                        margin=dict(l=10, r=10, t=10, b=10),
-                        height=320,
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+        hero_c1, hero_c2 = st.columns([1.4, 1])
+        with hero_c1:
+            latest_usd = f"${usd_stats['latest']:,.0f}".replace(",", " ") if usd_stats else "—"
+            month_str, month_color = (None, None)
+            if usd_stats:
+                m_val, m_pct = usd_stats["month_delta"], usd_stats["month_pct"]
+                m_str = fmt_usd(m_val) if m_val is not None else None
+                y_val, y_pct = usd_stats["year_delta"], usd_stats["year_pct"]
+                y_str = fmt_usd(y_val) if y_val is not None else None
             else:
-                st.warning("Нет данных для отображения.")
-    with col4:
-        with card("dash", "leverage"):
-            section_title("⚖️ Долг / капитал, %")
+                m_str = m_pct = y_str = y_pct = None
+            st.markdown(
+                "<div class='cn-card'>"
+                "<div class='cn-label'>Капитал, $</div>"
+                f"<div class='cn-big-number'>{_esc(latest_usd)}</div>"
+                "<div class='cn-pnl-row'>"
+                f"{_pnl_block('За месяц', m_str, m_pct)}"
+                f"{_pnl_block('За год', y_str, y_pct)}"
+                "</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        with hero_c2:
+            latest_rub = f"{rub_stats['latest'] / 1_000_000:.1f} млн ₽" if rub_stats else "—"
+            if rub_stats:
+                rm_val, rm_pct = rub_stats["month_delta"], rub_stats["month_pct"]
+                rm_str = fmt_rub_millions(rm_val) if rm_val is not None else None
+            else:
+                rm_str = rm_pct = None
+            st.markdown(
+                "<div class='cn-card'>"
+                "<div class='cn-label'>Капитал, ₽</div>"
+                f"<div class='cn-big-number secondary'>{_esc(latest_rub)}</div>"
+                "<div class='cn-pnl-row'>"
+                f"{_pnl_block('За месяц', rm_str, rm_pct)}"
+                "</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+        # ---------------- Структура капитала — карточки-активы ----------------
+        allocation = load_asset_allocation()
+        if allocation.empty:
+            st.warning("Не нашёл помесячный срез с разбивкой по активам.")
+        else:
+            total_alloc = allocation["Сумма"].sum()
+            cards_html = ""
+            for _, row in allocation.sort_values("Сумма", ascending=False).iterrows():
+                name = row["Категория"]
+                amt = row["Сумма"]
+                pct = (amt / total_alloc * 100) if total_alloc else 0
+                cards_html += (
+                    "<div class='cn-asset-card'>"
+                    "<div class='cn-asset-head'>"
+                    f"<div class='cn-asset-icon'>{_asset_icon(name)}</div>"
+                    f"<div class='cn-asset-name'>{_esc(name)}</div>"
+                    "</div>"
+                    f"<div class='cn-asset-value'>{_esc(_fmt_point_value(amt, 'USD'))}</div>"
+                    f"<div class='cn-asset-pct'>{pct:.1f}% портфеля</div>"
+                    "</div>"
+                )
+            st.markdown(f"<div class='cn-asset-row'>{cards_html}</div>", unsafe_allow_html=True)
+            st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+        # ---------------- События — в стиле списка «Transactions» ----------------
+        with st.container(key="dash_coinaco_events_card"):
+            st.markdown("<div class='cn-side-title' style='padding-top:14px'>📌 События на графиках</div>", unsafe_allow_html=True)
+            events = st.session_state["events"]
+            with st.expander(f"➕ Добавить / список ({len(events)})"):
+                st.caption("Отмечают особые решения. Появляются меткой на выбранных графиках, "
+                           "при наведении — дата и текст.")
+                with st.form("add_event", clear_on_submit=True):
+                    ec1, ec2 = st.columns([1, 3])
+                    ev_date = ec1.date_input("Дата", value=date.today(), format="DD.MM.YYYY")
+                    ev_comment = ec2.text_input("Комментарий")
+                    ev_charts = st.multiselect(
+                        "На каких графиках показать",
+                        options=list(CHART_OPTIONS), format_func=lambda k: CHART_OPTIONS[k],
+                        default=["capital_usd"],
+                    )
+                    if st.form_submit_button("Добавить событие"):
+                        if ev_comment.strip() and ev_charts:
+                            events.append({
+                                "id": str(uuid.uuid4()), "date": ev_date.isoformat(),
+                                "comment": ev_comment.strip(), "charts": ev_charts,
+                            })
+                            save_events(events)
+                            st.rerun()
+                        else:
+                            st.warning("Заполни комментарий и выбери хотя бы один график.")
+
+                if events:
+                    for ev in sorted(events, key=lambda e: e.get("date", ""), reverse=True):
+                        tc1, tc2, tc3 = st.columns([6, 3, 1])
+                        charts_str = ", ".join(CHART_OPTIONS.get(k, k) for k in ev.get("charts", []))
+                        try:
+                            date_str = pd.to_datetime(ev["date"]).strftime("%d.%m.%Y")
+                        except Exception:  # noqa: BLE001
+                            date_str = str(ev.get("date", ""))
+                        tc1.markdown(
+                            "<div class='cn-tx-left'><div class='cn-tx-icon'>📌</div>"
+                            f"<div><div class='cn-tx-name'>{_esc(ev.get('comment', ''))}</div>"
+                            f"<div class='cn-tx-sub'>{_esc(charts_str)}</div></div></div>",
+                            unsafe_allow_html=True,
+                        )
+                        tc2.markdown(f"<div class='cn-tx-date'>{_esc(date_str)}</div>", unsafe_allow_html=True)
+                        if tc3.button("🗑", key=f"ev_del_{ev['id']}", help="Удалить событие"):
+                            st.session_state["events"] = [x for x in events if x["id"] != ev["id"]]
+                            save_events(st.session_state["events"])
+                            st.rerun()
+
+        st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
+
+        # ---------------- Графики ----------------
+        gc1, gc2 = st.columns(2)
+        with gc1:
+            with st.container(key="dash_coinaco_chart_capusd"):
+                st.markdown("<div class='cn-side-title'>💵 Капитал, $</div>", unsafe_allow_html=True)
+                line_chart(capital_usd, "USD", "#16A34A", chart_key="capital_usd")
+        with gc2:
+            with st.container(key="dash_coinaco_chart_caprub"):
+                st.markdown("<div class='cn-side-title'>💰 Капитал, ₽</div>", unsafe_allow_html=True)
+                line_chart(capital_rub, "RUB", "#1565C0")
+
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+        gc3, gc4 = st.columns(2)
+        with gc3:
+            with st.container(key="dash_coinaco_chart_debt"):
+                st.markdown("<div class='cn-side-title'>📉 Долговая нагрузка, $</div>", unsafe_allow_html=True)
+                st.caption("Значения без даты в исходной таблице пропущены")
+                line_chart(debt, "USD", "#E5484D", chart_key="debt")
+        with gc4:
+            with st.container(key="dash_coinaco_chart_leverage"):
+                st.markdown("<div class='cn-side-title'>⚖️ Долг / капитал, %</div>", unsafe_allow_html=True)
+                if not debt.empty and not capital_usd.empty:
+                    merged = pd.merge(capital_usd, debt, on="date", suffixes=("_cap", "_debt"))
+                    merged = monthly_view(merged)
+                    if merged.empty:
+                        st.warning("Нет пересекающихся дат для расчёта.")
+                    else:
+                        merged["leverage"] = -merged["value_debt"] / merged["value_cap"] * 100
+                        fig = px.line(merged, x="date", y="leverage", markers=True)
+                        fig.update_traces(
+                            line_color="#F5A623",
+                            customdata=merged["leverage"].apply(lambda v: _fmt_point_value(v, "%")),
+                            hovertemplate="<b>%{x|%d.%m.%Y}</b><br>%{customdata}<extra></extra>",
+                        )
+                        fig.update_layout(
+                            xaxis_title=None, yaxis_title="%",
+                            margin=dict(l=10, r=10, t=10, b=10), height=280,
+                            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        )
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                else:
+                    st.warning("Нет данных для отображения.")
+
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+        gc5, gc6 = st.columns(2)
+        with gc5:
+            with st.container(key="dash_coinaco_chart_active"):
+                st.markdown("<div class='cn-side-title'>💼 Активный доход, $</div>", unsafe_allow_html=True)
+                line_chart(data.get("active_income"), "USD", "#1565C0", chart_key="active_income")
+        with gc6:
+            with st.container(key="dash_coinaco_chart_passive"):
+                st.markdown("<div class='cn-side-title'>🌿 Пассивный доход, $</div>", unsafe_allow_html=True)
+                line_chart(data.get("passive_income"), "USD", "#6A1B9A", chart_key="passive_income")
+
+    with side_col:
+        # ---------------- Гейдж: Долг / капитал (текущее значение) ----------------
+        with st.container(key="dash_coinaco_side_gauge"):
+            st.markdown("<div class='cn-side-title'>⚖️ Риск: долг / капитал</div>", unsafe_allow_html=True)
+            leverage_now, leverage_prev = None, None
             if not debt.empty and not capital_usd.empty:
-                # Мерджим по точной дате отчёта и берём помесячный ряд (1-е число +
-                # последнее показание) — иначе два отчёта за один месяц (13 и 14 июля)
-                # дают дубли и вертикальные всплески на графике.
                 merged = pd.merge(capital_usd, debt, on="date", suffixes=("_cap", "_debt"))
                 merged = monthly_view(merged)
-                if merged.empty:
-                    st.warning("Нет пересекающихся дат для расчёта.")
-                else:
+                if not merged.empty:
                     merged["leverage"] = -merged["value_debt"] / merged["value_cap"] * 100
-                    fig = px.line(merged, x="date", y="leverage", markers=True)
-                    fig.update_traces(
-                        line_color="#EF6C00",
-                        customdata=merged["leverage"].apply(lambda v: _fmt_point_value(v, "%")),
-                        hovertemplate="<b>%{x|%d.%m.%Y}</b><br>%{customdata}<extra></extra>",
-                    )
-                    fig.update_layout(
-                        xaxis_title=None,
-                        yaxis_title="%",
-                        margin=dict(l=10, r=10, t=10, b=10),
-                        height=320,
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                    leverage_now = merged.iloc[-1]["leverage"]
+                    if len(merged) > 1:
+                        leverage_prev = merged.iloc[-2]["leverage"]
+            if leverage_now is None:
+                st.markdown("<div class='cn-risk-sub' style='margin:20px 0'>Нет данных.</div>", unsafe_allow_html=True)
             else:
-                st.warning("Нет данных для отображения.")
+                axis_max = max(leverage_now * 1.4, 40)
+                if leverage_now < 15:
+                    risk_label, risk_color = "Низкий риск", "#1DBF73"
+                elif leverage_now < 35:
+                    risk_label, risk_color = "Умеренный риск", "#F5A623"
+                else:
+                    risk_label, risk_color = "Высокий риск", "#E5484D"
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=leverage_now,
+                    number={"suffix": "%", "font": {"size": 32, "color": "#17171C"}},
+                    gauge={
+                        "axis": {"range": [0, axis_max], "visible": False},
+                        "bar": {"color": "rgba(0,0,0,0)"},
+                        "bgcolor": "rgba(0,0,0,0)",
+                        "borderwidth": 0,
+                        "steps": [
+                            {"range": [0, axis_max * 0.35], "color": "#1DBF73"},
+                            {"range": [axis_max * 0.35, axis_max * 0.7], "color": "#F5A623"},
+                            {"range": [axis_max * 0.7, axis_max], "color": "#E5484D"},
+                        ],
+                    },
+                ))
+                fig.update_layout(margin=dict(l=20, r=20, t=10, b=0), height=170, paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                st.markdown(f"<div class='cn-risk-label' style='color:{risk_color}'>{_esc(risk_label)}</div>", unsafe_allow_html=True)
+                if leverage_prev is not None:
+                    st.markdown(
+                        f"<div class='cn-risk-sub'>Месяц назад: {leverage_prev:.1f}%</div>",
+                        unsafe_allow_html=True,
+                    )
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
-    col5, col6 = st.columns(2)
-    with col5:
-        with card("dash", "debt"):
-            section_title("📉 Долговая нагрузка, $")
-            st.caption("Значения без даты в исходной таблице пропущены")
-            line_chart(debt, "USD", "#C62828", chart_key="debt")
-    with col6:
-        with card("dash", "allocation"):
-            section_title("🥧 Структура капитала по классам активов")
-            allocation = load_asset_allocation()
-            if allocation.empty:
-                st.warning("Не нашёл помесячный срез с разбивкой по активам.")
+        # ---------------- Top Movers: прирост капитала по годам ----------------
+        with st.container(key="dash_coinaco_side_movers"):
+            st.markdown("<div class='cn-side-title'>📊 Прирост по годам</div>", unsafe_allow_html=True)
+            if capital_usd.empty:
+                st.markdown("<div class='cn-risk-sub'>Нет данных.</div>", unsafe_allow_html=True)
             else:
-                fig = px.pie(allocation, names="Категория", values="Сумма", hole=0.4,
-                             color_discrete_sequence=GREEN_PALETTE)
-                fig.update_traces(
-                    customdata=allocation["Сумма"].apply(lambda v: _fmt_point_value(v, "USD")),
-                    hovertemplate="<b>%{label}</b><br>%{customdata} · %{percent}<extra></extra>",
+                yearly = (
+                    capital_usd.assign(Год=capital_usd["date"].dt.year)
+                    .groupby("Год", as_index=False)["value"].last()
                 )
-                fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320)
-                st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
-    col7, col8 = st.columns(2)
-    with col7:
-        with card("dash", "active_income"):
-            section_title("💼 Активный доход, $")
-            line_chart(data.get("active_income"), "USD", "#1565C0", chart_key="active_income")
-    with col8:
-        with card("dash", "passive_income"):
-            section_title("🌿 Пассивный доход, $")
-            line_chart(data.get("passive_income"), "USD", "#6A1B9A", chart_key="passive_income")
+                yearly["Прирост"] = yearly["value"].diff()
+                yearly["Прирост_pct"] = yearly["value"].pct_change() * 100
+                yearly = yearly.dropna(subset=["Прирост"]).sort_values("Прирост_pct", ascending=False)
+                if yearly.empty:
+                    st.markdown("<div class='cn-risk-sub'>Недостаточно данных.</div>", unsafe_allow_html=True)
+                else:
+                    rows_html = ""
+                    for _, r in yearly.iterrows():
+                        pos = r["Прирост"] >= 0
+                        cls = "pos" if pos else "neg"
+                        arrow = "↗" if pos else "↘"
+                        rows_html += (
+                            "<div class='cn-mover-row'>"
+                            "<div class='cn-mover-left'>"
+                            f"<div class='cn-mover-icon'>{int(r['Год']) % 100}</div>"
+                            f"<div class='cn-mover-name'>{int(r['Год'])}</div>"
+                            "</div>"
+                            "<div class='cn-mover-value'>"
+                            f"<div class='cn-mover-amount'>{_esc(_fmt_point_value(r['Прирост'], 'USD'))}</div>"
+                            f"<div class='cn-mover-pct {cls}'>{arrow} {abs(r['Прирост_pct']):.1f}%</div>"
+                            "</div>"
+                            "</div>"
+                        )
+                    st.markdown(rows_html, unsafe_allow_html=True)
