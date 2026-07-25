@@ -22,6 +22,32 @@ st.markdown(
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Montserrat', sans-serif !important;
     }
+
+    /* Боковое меню — фирменный стиль Coinaco: кремовый фон, тёмная пилюля
+    на активной странице. Таргетимся на data-testid, а не на автогенерируемые
+    emotion-классы — они меняются между версиями Streamlit. */
+    section[data-testid="stSidebar"] {
+        background: #F7F5F0;
+        border-right: 1px solid #ECE9E2;
+    }
+    [data-testid="stSidebarNavLink"] {
+        border-radius: 12px;
+        margin: 2px 8px;
+    }
+    [data-testid="stSidebarNavLink"]:hover {
+        background: #ECE9E2 !important;
+    }
+    [data-testid="stSidebarNavLink"] span, [data-testid="stSidebarNavLink"] p {
+        color: #4b4d57 !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stSidebarNavLink"][aria-current="page"] {
+        background: #17171C !important;
+    }
+    [data-testid="stSidebarNavLink"][aria-current="page"] span,
+    [data-testid="stSidebarNavLink"][aria-current="page"] p {
+        color: #ffffff !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
