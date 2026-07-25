@@ -130,92 +130,69 @@ def _deal_label(row):
     return detail or deal_type or "Сделка"
 
 
-# ============================ Bankio-style дизайн (эксперимент) ============================
-# Полностью самостоятельная вёрстка под референс-скриншот (пастельные заливные
-# карточки, pill-кнопки, гладкие графики) — не завязана на общий theme.py, поэтому
-# откат = один `git revert` этого коммита, без побочных эффектов на другие страницы.
-BANKIO_CSS = """
+# ============================ Coinaco-style дизайн (финальный стиль платформы) ============================
+# Самостоятельная вёрстка (тот же приём, что и в views/dashboard.py) — своя
+# CSS-палитра токенов под ключом страницы, без завязки на общий theme.py.
+COINACO_CSS = """
 <style>
-.st-key-deals_bankio{
-  background: linear-gradient(160deg, #dee8fc 0%, #eef2fd 55%, #eef2fd 100%);
-  border-radius: 32px;
-  padding: 28px 28px 26px;
-}
-.st-key-deals_bankio .bk-hero{display:flex;align-items:center;gap:14px;margin-bottom:20px}
-.st-key-deals_bankio .bk-hero-icon{
-  width:46px;height:46px;border-radius:15px;
-  background:linear-gradient(135deg,#34D399,#10B981);
-  display:flex;align-items:center;justify-content:center;font-size:22px;
-  box-shadow:0 10px 20px -10px rgba(16,185,129,.6);
-}
-.st-key-deals_bankio .bk-hero-title{font-size:1.65rem;font-weight:800;color:#12121c;letter-spacing:-.01em}
-.st-key-deals_bankio .bk-hero-sub{color:#7c828e;font-size:.88rem;margin-top:1px}
+.st-key-deals_coinaco{background:#EFEDE8;border-radius:28px;padding:26px 26px 24px}
+.st-key-deals_coinaco .cn-hero-title{font-size:1.9rem;font-weight:700;color:#17171C;letter-spacing:-.01em}
+.st-key-deals_coinaco .cn-hero-sub{color:#8b8d98;font-size:.88rem;margin-top:2px}
 
-.st-key-deals_bankio_period div[data-testid="stHorizontalBlock"]{
+.st-key-deals_coinaco_period div[data-testid="stHorizontalBlock"]{
   background:#fff;border-radius:999px;padding:5px;gap:4px !important;
-  box-shadow:0 3px 12px -6px rgba(20,20,40,.18);
 }
-.st-key-deals_bankio_period [data-testid="stBaseButton-secondary"]{
-  border:none !important;background:transparent !important;color:#7c828e !important;
+.st-key-deals_coinaco_period [data-testid="stBaseButton-secondary"]{
+  border:none !important;background:transparent !important;color:#6b6f7a !important;
   border-radius:999px !important;font-weight:600 !important;box-shadow:none !important;
 }
-.st-key-deals_bankio_period [data-testid="stBaseButton-primary"]{
-  border:none !important;background:#12121c !important;color:#fff !important;
+.st-key-deals_coinaco_period [data-testid="stBaseButton-primary"]{
+  border:none !important;background:#17171C !important;color:#fff !important;
   border-radius:999px !important;font-weight:700 !important;
 }
 
-.st-key-deals_bankio_filters{
-  background:rgba(255,255,255,.55);border-radius:20px;padding:14px 18px 2px;margin:14px 0 6px;
+.st-key-deals_coinaco_filters{
+  background:rgba(255,255,255,.6);border-radius:20px;padding:14px 18px 2px;margin:14px 0 6px;
 }
 
-.bk-card{border-radius:26px;padding:22px 22px 20px;height:100%;box-sizing:border-box}
-.bk-card-blue{background:#E4EDFC}
-.bk-card-blue-strong{background:#D2E0FB}
-.bk-card-green{background:#DCEEE3}
-.bk-card-lavender{background:#EFF2FC}
-.bk-card-title{font-size:1.02rem;font-weight:700;color:#12121c}
-.bk-card-sub{color:#7c828e;font-size:.78rem;margin-top:2px}
-.bk-big-number{font-size:2.15rem;font-weight:800;color:#12121c;letter-spacing:-.02em;margin:10px 0 2px}
+.cn-card{background:#fff;border-radius:20px;padding:22px;height:100%;box-sizing:border-box}
+.cn-label{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9a9ca6}
+.cn-big-number{font-size:2.1rem;font-weight:800;color:#17171C;letter-spacing:-.02em;margin-top:8px}
+.cn-card-amt{color:#9a9ca6;font-size:.78rem;margin-top:2px}
 
-.bk-pill{
-  display:inline-flex;align-items:center;gap:6px;background:#fff;color:#12121c;
-  padding:8px 14px;border-radius:999px;font-weight:700;font-size:.78rem;
-  box-shadow:0 3px 10px -5px rgba(20,20,40,.3);
-}
+.cn-section-title{font-weight:700;font-size:1rem;color:#17171C;margin-bottom:4px}
 
-.bk-tx-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(18,18,28,.08)}
-.bk-tx-row:last-child{border-bottom:none}
-.bk-tx-left{display:flex;align-items:center;gap:11px;min-width:0}
-.bk-tx-icon{
-  width:36px;height:36px;border-radius:50%;background:#fff;display:flex;align-items:center;
-  justify-content:center;font-size:16px;flex-shrink:0;
-}
-.bk-tx-text{min-width:0}
-.bk-tx-name{font-weight:700;color:#12121c;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
-.bk-tx-date{color:#7c828e;font-size:.72rem}
-.bk-tx-amount{font-weight:700;font-size:.85rem;flex-shrink:0;padding-left:10px}
-.bk-tx-amount.pos{color:#1b8f5a}
-.bk-tx-amount.neg{color:#12121c}
+.cn-tx-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F1EFEA}
+.cn-tx-row:last-child{border-bottom:none}
+.cn-tx-left{display:flex;align-items:center;gap:11px;min-width:0}
+.cn-tx-icon{width:36px;height:36px;border-radius:50%;background:#F1EFEA;display:flex;align-items:center;
+  justify-content:center;font-size:16px;flex-shrink:0}
+.cn-tx-text{min-width:0}
+.cn-tx-name{font-weight:700;color:#17171C;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.cn-tx-date{color:#9a9ca6;font-size:.72rem}
+.cn-tx-amount{font-weight:700;font-size:.85rem;flex-shrink:0;padding-left:10px;text-align:right}
+.cn-tx-amount.pos{color:#1DBF73}
+.cn-tx-amount.neg{color:#17171C}
 
-.bk-minibar-row{display:flex;align-items:flex-end;gap:7px;height:96px;margin-top:16px}
-.bk-minibar{flex:1;border-radius:8px 8px 3px 3px;background:rgba(255,255,255,.6);min-height:4px}
-.bk-minibar.active{background:#4C7CF0}
-.bk-minibar-labels{display:flex;gap:7px;margin-top:7px}
-.bk-minibar-labels span{flex:1;text-align:center;font-size:.7rem;color:#5b6472;font-weight:600}
+.cn-minibar-row{display:flex;align-items:flex-end;gap:7px;height:96px;margin-top:16px}
+.cn-minibar{flex:1;border-radius:8px 8px 3px 3px;background:#F1EFEA;min-height:4px}
+.cn-minibar.active{background:#1DBF73}
+.cn-minibar-labels{display:flex;gap:7px;margin-top:7px}
+.cn-minibar-labels span{flex:1;text-align:center;font-size:.7rem;color:#6b6f7a;font-weight:600}
 
-.st-key-deals_bankio_table{background:#fff;border-radius:26px;padding:20px}
+.st-key-deals_coinaco_table{background:#fff;border-radius:20px;padding:20px}
 </style>
 """
 
-with st.container(key="deals_bankio"):
-    st.markdown(BANKIO_CSS, unsafe_allow_html=True)
+with st.container(key="deals_coinaco"):
+    st.markdown(COINACO_CSS, unsafe_allow_html=True)
 
     st.markdown(
-        "<div class='bk-hero'><div class='bk-hero-icon'>📈</div>"
-        "<div><div class='bk-hero-title'>Реестр сделок</div>"
-        "<div class='bk-hero-sub'>Инвестиции, продажи и дивиденды — в одном месте</div></div></div>",
+        "<div class='cn-hero-title'>Реестр сделок</div>"
+        "<div class='cn-hero-sub'>Инвестиции, продажи и дивиденды — в одном месте</div>",
         unsafe_allow_html=True,
     )
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
     # ============================ Период ============================
     years = sorted(df["Дата"].dt.year.dropna().unique().astype(int)) if "Дата" in df.columns else []
@@ -223,18 +200,18 @@ with st.container(key="deals_bankio"):
     if st.session_state.get("deals_period") not in period_options:
         st.session_state["deals_period"] = "Все время"
 
-    with st.container(key="deals_bankio_period"):
+    with st.container(key="deals_coinaco_period"):
         pcols = st.columns(len(period_options))
         for i, opt in enumerate(period_options):
             is_sel = st.session_state["deals_period"] == opt
-            if pcols[i].button(opt, key=f"bk_period_{opt}", width="stretch",
+            if pcols[i].button(opt, key=f"cn_period_{opt}", width="stretch",
                                type="primary" if is_sel else "secondary"):
                 st.session_state["deals_period"] = opt
                 st.rerun()
     period = st.session_state["deals_period"]
 
     # ============================ Фильтры ============================
-    with st.container(key="deals_bankio_filters"):
+    with st.container(key="deals_coinaco_filters"):
         fc1, fc2 = st.columns(2)
         with fc1:
             asset_types = sorted(df[ASSET_COL].dropna().unique()) if ASSET_COL in df.columns else []
@@ -252,7 +229,7 @@ with st.container(key="deals_bankio"):
         filtered = filtered[filtered["Дата"].dt.year == int(period)]
 
     st.markdown(
-        f"<div style='color:#7c828e;font-size:.85rem;margin:14px 0 16px'>Найдено сделок: {len(filtered)}</div>",
+        f"<div style='color:#9a9ca6;font-size:.85rem;margin:14px 0 16px'>Найдено сделок: {len(filtered)}</div>",
         unsafe_allow_html=True,
     )
 
@@ -265,33 +242,33 @@ with st.container(key="deals_bankio"):
 
     # ---------------- Row 1: три отдельные карточки-цифры ----------------
     period_label = "за всё время" if period == "Все время" else f"за {period}"
-    profit_color = "#1b8f5a" if profit_total >= 0 else "#c0392b"
+    profit_color = "#1DBF73" if profit_total >= 0 else "#E5484D"
 
     r1c1, r1c2, r1c3 = st.columns(3)
     with r1c1:
         st.markdown(
-            "<div class='bk-card bk-card-lavender'>"
-            "<div class='bk-card-title'>Чистая прибыль</div>"
-            f"<div class='bk-card-sub'>{_esc(period_label)}</div>"
-            f"<div class='bk-big-number' style='color:{profit_color}'>{_esc(_fmt_signed(profit_total))}</div>"
+            "<div class='cn-card'>"
+            "<div class='cn-label'>Чистая прибыль</div>"
+            f"<div class='cn-big-number' style='color:{profit_color}'>{_esc(_fmt_signed(profit_total))}</div>"
+            f"<div class='cn-card-amt'>{_esc(period_label)}</div>"
             "</div>",
             unsafe_allow_html=True,
         )
     with r1c2:
         st.markdown(
-            "<div class='bk-card bk-card-blue-strong'>"
-            "<div class='bk-card-title'>Инвестировано</div>"
-            f"<div class='bk-card-sub'>{_esc(period_label)}</div>"
-            f"<div class='bk-big-number'>{_esc(_fmt_pos(invested))}</div>"
+            "<div class='cn-card'>"
+            "<div class='cn-label'>Инвестировано</div>"
+            f"<div class='cn-big-number'>{_esc(_fmt_pos(invested))}</div>"
+            f"<div class='cn-card-amt'>{_esc(period_label)}</div>"
             "</div>",
             unsafe_allow_html=True,
         )
     with r1c3:
         st.markdown(
-            "<div class='bk-card bk-card-green'>"
-            "<div class='bk-card-title'>Продано</div>"
-            f"<div class='bk-card-sub'>{_esc(period_label)}</div>"
-            f"<div class='bk-big-number'>{_esc(_fmt_pos(sold_sum))}</div>"
+            "<div class='cn-card'>"
+            "<div class='cn-label'>Продано</div>"
+            f"<div class='cn-big-number'>{_esc(_fmt_pos(sold_sum))}</div>"
+            f"<div class='cn-card-amt'>{_esc(period_label)}</div>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -317,19 +294,19 @@ with st.container(key="deals_bankio"):
         inv_years = _year_rows(INVEST, df)
         max_v = max((r["Сумма"] for r in inv_years), default=0) or 1
         bars_html = "".join(
-            f"<div class='bk-minibar{' active' if r['Год'] == inv_years[-1]['Год'] else ''}' "
+            f"<div class='cn-minibar{' active' if r['Год'] == inv_years[-1]['Год'] else ''}' "
             f"style='height:{max(r['Сумма'] / max_v * 100, 4):.0f}%'></div>"
             for r in inv_years
         )
         labels_html = "".join(f"<span>{r['Год']}</span>" for r in inv_years)
         total_invested_all = sum(r["Сумма"] for r in inv_years)
-        no_bars_html = "<div style='color:#7c828e;font-size:.8rem'>Нет данных</div>"
+        no_bars_html = "<div style='color:#9a9ca6;font-size:.8rem'>Нет данных</div>"
         st.markdown(
-            "<div class='bk-card bk-card-blue-strong'>"
-            "<div class='bk-card-title'>Инвестировано по годам</div>"
-            f"<div class='bk-card-sub'>{_esc(_fmt_pos(total_invested_all))} всего</div>"
-            f"<div class='bk-minibar-row'>{bars_html or no_bars_html}</div>"
-            f"<div class='bk-minibar-labels'>{labels_html}</div>"
+            "<div class='cn-card'>"
+            "<div class='cn-section-title'>Инвестировано по годам</div>"
+            f"<div class='cn-card-amt'>{_esc(_fmt_pos(total_invested_all))} всего</div>"
+            f"<div class='cn-minibar-row'>{bars_html or no_bars_html}</div>"
+            f"<div class='cn-minibar-labels'>{labels_html}</div>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -346,20 +323,20 @@ with st.container(key="deals_bankio"):
             amount_str = _fmt_signed(signed) if pd.notna(signed) else "—"
             cls = "pos" if (pd.notna(signed) and signed >= 0) else "neg"
             rows_html.append(
-                "<div class='bk-tx-row'>"
-                "<div class='bk-tx-left'>"
-                f"<div class='bk-tx-icon'>{icon}</div>"
-                f"<div class='bk-tx-text'><div class='bk-tx-name'>{_esc(name)}</div>"
-                f"<div class='bk-tx-date'>{_esc(date_str)}</div></div>"
+                "<div class='cn-tx-row'>"
+                "<div class='cn-tx-left'>"
+                f"<div class='cn-tx-icon'>{icon}</div>"
+                f"<div class='cn-tx-text'><div class='cn-tx-name'>{_esc(name)}</div>"
+                f"<div class='cn-tx-date'>{_esc(date_str)}</div></div>"
                 "</div>"
-                f"<div class='bk-tx-amount {cls}'>{_esc(amount_str)}</div>"
+                f"<div class='cn-tx-amount {cls}'>{_esc(amount_str)}</div>"
                 "</div>"
             )
         rows_joined = "".join(rows_html)
-        no_rows_html = "<div style='color:#7c828e;font-size:.85rem;margin-top:10px'>Нет сделок</div>"
+        no_rows_html = "<div style='color:#9a9ca6;font-size:.85rem;margin-top:10px'>Нет сделок</div>"
         st.markdown(
-            "<div class='bk-card bk-card-green'>"
-            "<div class='bk-card-title'>Сделки</div>"
+            "<div class='cn-card'>"
+            "<div class='cn-section-title'>Сделки</div>"
             f"{rows_joined or no_rows_html}"
             "</div>",
             unsafe_allow_html=True,
@@ -396,6 +373,6 @@ with st.container(key="deals_bankio"):
                 styles[row.index.get_loc("Сумма")] = "color:#10b981;font-weight:600"
         return styles
 
-    with st.container(key="deals_bankio_table"):
-        st.markdown("<div class='bk-card-title' style='margin-bottom:12px'>Все сделки</div>", unsafe_allow_html=True)
+    with st.container(key="deals_coinaco_table"):
+        st.markdown("<div class='cn-section-title' style='margin-bottom:12px'>Все сделки</div>", unsafe_allow_html=True)
         st.dataframe(display.style.apply(_style_row, axis=1), width="stretch", hide_index=True)
