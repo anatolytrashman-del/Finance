@@ -123,7 +123,7 @@ def card(page_key, suffix):
 
 
 def section_title(text):
-    st.markdown(f"<div class='tfo-section-title'>{text}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='tfo-section-title'>{esc(text)}</div>", unsafe_allow_html=True)
 
 
 def banner(icon, text, tone="good"):
