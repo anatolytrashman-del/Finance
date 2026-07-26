@@ -265,7 +265,15 @@ COINACO_CSS = """
 
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_chart_"]{background:#fff;border-radius:20px;padding:20px 20px 6px}
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_side_"]{background:#fff;border-radius:20px;padding:20px;margin-bottom:16px;height:100%;box-sizing:border-box}
-.st-key-dash_coinaco [class*="st-key-dash_coinaco_side_"] [data-testid="stVerticalBlock"]{height:100%}
+/* Строка с «Риск: долг/капитал» и «Прирост по годам» уже растягивает сами
+колонки (stColumn) по высоте более длинного соседа (Streamlit по умолчанию
+ставит align-items:stretch на строку колонок) — но каждая промежуточная
+обёртка Streamlit внутри колонки (stLayoutWrapper) сама по себе высоту не
+наследует, потому что stColumn не flex-контейнер, и height:100% у детей
+"повисает" на auto-родителе. Прокидываем 100% по всей цепочке. */
+.st-key-dash_coinaco [data-testid="stColumn"]{height:100%}
+.st-key-dash_coinaco [data-testid="stColumn"] > [data-testid="stLayoutWrapper"]{height:100%}
+.st-key-dash_coinaco [data-testid="stColumn"] > [data-testid="stLayoutWrapper"] > [data-testid="stVerticalBlock"]{height:100%}
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_events_"]{background:#fff;border-radius:20px;padding:6px 20px 4px;margin-bottom:16px}
 </style>
 """
