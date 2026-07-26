@@ -405,6 +405,7 @@ with st.container(key="dash_coinaco"):
     if allocation.empty:
         st.warning("Не нашёл помесячный срез с разбивкой по активам.")
     else:
+        st.markdown("<div class='cn-side-title'>📦 Структура капитала по классам активов</div>", unsafe_allow_html=True)
         total_alloc = allocation["Сумма"].sum()
         cards_html = ""
         for _, row in allocation.sort_values("Сумма", ascending=False).iterrows():
