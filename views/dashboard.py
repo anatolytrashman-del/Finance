@@ -265,18 +265,30 @@ COINACO_CSS = """
 
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_chart_"]{background:#fff;border-radius:20px;padding:20px 20px 6px}
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_side_"]{background:#fff;border-radius:20px;padding:20px;margin-bottom:16px;height:100%;box-sizing:border-box}
-/* Строка с «Риск: долг/капитал» и «Прирост по годам» уже растягивает сами
-колонки (stColumn) по высоте более длинного соседа (Streamlit по умолчанию
-ставит align-items:stretch на строку колонок) — но промежуточные обёртки
-Streamlit внутри колонки сами по себе высоту не наследуют, потому что
-stColumn не flex-контейнер. Превращаем именно ЭТИ две колонки (и только
-их — :has() ограничивает выбор, чтобы не задеть другие пары карточек на
-странице, вроде «Капитал $/₽») в flex-контейнеры сверху донизу, чтобы
-дочерняя карточка могла вырасти на всю высоту через flex:1. */
+/* Любая пара карточек в строке (риск/прирост, капитал $/₽) должна быть
+одной высоты — по умолчанию каждая колонка (stColumn) сама растягивается
+до высоты более длинного соседа (align-items:stretch на строке), но
+Streamlit-обёртки ВНУТРИ колонки (stVerticalBlock/stElementContainer/
+stMarkdown/...) высоту родителя не наследуют, потому что stColumn не
+flex-контейнер и height:100% у детей "повисает" на auto-родителе. Метим
+такие карточки классом-маркером (dash_coinaco_side_* или _eqh_ — второй
+для карточек без своего фона/паддинга, где сам .cn-card уже рисует
+белую рамку) и прокидываем реальную высоту по всей цепочке. :has()
+ограничивает выбор строго этими колонками, не задевая остальные пары. */
 .st-key-dash_coinaco [data-testid="stColumn"]:has([class*="st-key-dash_coinaco_side_"]),
+.st-key-dash_coinaco [data-testid="stColumn"]:has([class*="st-key-dash_coinaco_eqh_"]),
 .st-key-dash_coinaco [data-testid="stColumn"]:has([class*="st-key-dash_coinaco_side_"]) > *,
-.st-key-dash_coinaco [data-testid="stColumn"]:has([class*="st-key-dash_coinaco_side_"]) > * > * {
+.st-key-dash_coinaco [data-testid="stColumn"]:has([class*="st-key-dash_coinaco_eqh_"]) > *,
+.st-key-dash_coinaco [data-testid="stColumn"]:has([class*="st-key-dash_coinaco_side_"]) > * > *,
+.st-key-dash_coinaco [data-testid="stColumn"]:has([class*="st-key-dash_coinaco_eqh_"]) > * > * {
   display:flex; flex-direction:column; flex:1 1 auto; min-height:0;
+}
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_eqh_"],
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_eqh_"] > *,
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_eqh_"] > * > *,
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_eqh_"] > * > * > *,
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_eqh_"] > * > * > * > * {
+  height:100%;
 }
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_events_"]{background:#fff;border-radius:20px;padding:6px 20px 4px;margin-bottom:16px}
 </style>
@@ -348,19 +360,20 @@ with st.container(key="dash_coinaco"):
             y_str = fmt_usd(y_val) if y_val is not None else None
         else:
             m_str = m_pct = y_str = y_pct = None
-        st.markdown(
-            "<div class='cn-card'>"
-            "<div class='cn-hero-flex'>"
-            "<div><div class='cn-label'>Капитал, $</div>"
-            f"<div class='cn-big-number'>{_esc(latest_usd)}</div></div>"
-            "<div class='cn-pnl-row'>"
-            f"{_pnl_block('За месяц', m_str, m_pct)}"
-            f"{_pnl_block('За год', y_str, y_pct)}"
-            "</div>"
-            "</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        with st.container(key="dash_coinaco_eqh_hero_usd"):
+            st.markdown(
+                "<div class='cn-card'>"
+                "<div class='cn-hero-flex'>"
+                "<div><div class='cn-label'>Капитал, $</div>"
+                f"<div class='cn-big-number'>{_esc(latest_usd)}</div></div>"
+                "<div class='cn-pnl-row'>"
+                f"{_pnl_block('За месяц', m_str, m_pct)}"
+                f"{_pnl_block('За год', y_str, y_pct)}"
+                "</div>"
+                "</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
     with hero_c2:
         latest_rub = f"{rub_stats['latest'] / 1_000_000:.1f} млн ₽" if rub_stats else "—"
         if rub_stats:
@@ -370,19 +383,20 @@ with st.container(key="dash_coinaco"):
             ry_str = fmt_rub_millions(ry_val) if ry_val is not None else None
         else:
             rm_str = rm_pct = ry_str = ry_pct = None
-        st.markdown(
-            "<div class='cn-card'>"
-            "<div class='cn-hero-flex'>"
-            "<div><div class='cn-label'>Капитал, ₽</div>"
-            f"<div class='cn-big-number secondary'>{_esc(latest_rub)}</div></div>"
-            "<div class='cn-pnl-row'>"
-            f"{_pnl_block('За месяц', rm_str, rm_pct)}"
-            f"{_pnl_block('За год', ry_str, ry_pct)}"
-            "</div>"
-            "</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        with st.container(key="dash_coinaco_eqh_hero_rub"):
+            st.markdown(
+                "<div class='cn-card'>"
+                "<div class='cn-hero-flex'>"
+                "<div><div class='cn-label'>Капитал, ₽</div>"
+                f"<div class='cn-big-number secondary'>{_esc(latest_rub)}</div></div>"
+                "<div class='cn-pnl-row'>"
+                f"{_pnl_block('За месяц', rm_str, rm_pct)}"
+                f"{_pnl_block('За год', ry_str, ry_pct)}"
+                "</div>"
+                "</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
