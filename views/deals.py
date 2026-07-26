@@ -1,6 +1,7 @@
 import html
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from data_source import load_deals, sidebar_refresh_control
@@ -33,8 +34,6 @@ CATEGORY_COLORS = {
     DIVIDEND: ("#10b981", "#ecfdf5"),
     OTHER: ("#6b7280", "#f3f4f6"),
 }
-CATEGORY_ICONS = {INVEST: "🏠", SALE: "💰", DIVIDEND: "💵", OTHER: "📄"}
-
 RENT_MONTHLY = 375.0
 RENT_START = pd.Timestamp(2025, 2, 1)
 RENT_LABEL = "Аренда квартиры"
@@ -114,22 +113,6 @@ def _signed_amount(row):
     return -abs(amt) if row.get("Категория") == INVEST else abs(amt)
 
 
-def _deal_label(row):
-    """Заголовок строки в списке «Сделки» — «Покупка»/«Продажа» сами по себе не
-    говорят, о какой сделке речь, поэтому дополняем конкретикой: объект,
-    назначение или вид актива, что найдётся первым."""
-    deal_type = str(row.get(DEAL_TYPE_COL) or "").strip()
-    detail = None
-    for col in ("Объект", "Назначение", ASSET_COL):
-        v = row.get(col)
-        if v is not None and str(v).strip() and str(v).strip().lower() != "nan":
-            detail = str(v).strip()
-            break
-    if deal_type and detail and detail.lower() != deal_type.lower():
-        return f"{deal_type} · {detail}"
-    return detail or deal_type or "Сделка"
-
-
 # ============================ Coinaco-style дизайн (финальный стиль платформы) ============================
 # Самостоятельная вёрстка (тот же приём, что и в views/dashboard.py) — своя
 # CSS-палитра токенов под ключом страницы, без завязки на общий theme.py.
@@ -154,6 +137,12 @@ COINACO_CSS = """
 .st-key-deals_coinaco_filters{
   background:rgba(255,255,255,.6);border-radius:20px;padding:14px 18px 2px;margin:14px 0 6px;
 }
+/* Теги мультиселектов (Вид актива / Категория) — нейтральный цвет интерфейса
+вместо тревожно-красного/акцентного, чтобы не выбивались из общей палитры. */
+.st-key-deals_coinaco_filters [data-baseweb="tag"]{
+  background-color:#E3E0D8 !important;color:#17171C !important;
+}
+.st-key-deals_coinaco_filters [data-baseweb="tag"] svg{fill:#17171C !important}
 
 .cn-card{background:#fff;border-radius:20px;padding:22px;height:100%;box-sizing:border-box}
 .cn-label{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9a9ca6}
@@ -162,24 +151,7 @@ COINACO_CSS = """
 
 .cn-section-title{font-weight:700;font-size:1rem;color:#17171C;margin-bottom:4px}
 
-.cn-tx-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F1EFEA}
-.cn-tx-row:last-child{border-bottom:none}
-.cn-tx-left{display:flex;align-items:center;gap:11px;min-width:0}
-.cn-tx-icon{width:36px;height:36px;border-radius:50%;background:#F1EFEA;display:flex;align-items:center;
-  justify-content:center;font-size:16px;flex-shrink:0}
-.cn-tx-text{min-width:0}
-.cn-tx-name{font-weight:700;color:#17171C;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
-.cn-tx-date{color:#9a9ca6;font-size:.72rem}
-.cn-tx-amount{font-weight:700;font-size:.85rem;flex-shrink:0;padding-left:10px;text-align:right}
-.cn-tx-amount.pos{color:#1DBF73}
-.cn-tx-amount.neg{color:#17171C}
-
-.cn-minibar-row{display:flex;align-items:flex-end;gap:7px;height:96px;margin-top:16px}
-.cn-minibar{flex:1;border-radius:8px 8px 3px 3px;background:#F1EFEA;min-height:4px}
-.cn-minibar.active{background:#1DBF73}
-.cn-minibar-labels{display:flex;gap:7px;margin-top:7px}
-.cn-minibar-labels span{flex:1;text-align:center;font-size:.7rem;color:#6b6f7a;font-weight:600}
-
+.st-key-deals_coinaco_chart_invested{background:#fff;border-radius:20px;padding:20px 20px 6px}
 .st-key-deals_coinaco_table{background:#fff;border-radius:20px;padding:20px}
 </style>
 """
@@ -288,59 +260,33 @@ with st.container(key="deals_coinaco"):
         g["Год"] = g["Год"].astype(int)
         return g.sort_values("Год").to_dict("records")
 
-    r2c1, r2c2 = st.columns([1, 1.2])
-
-    with r2c1:
+    with st.container(key="deals_coinaco_chart_invested"):
+        st.markdown("<div class='cn-section-title'>Инвестировано по годам</div>", unsafe_allow_html=True)
         inv_years = _year_rows(INVEST, df)
-        max_v = max((r["Сумма"] for r in inv_years), default=0) or 1
-        bars_html = "".join(
-            f"<div class='cn-minibar{' active' if r['Год'] == inv_years[-1]['Год'] else ''}' "
-            f"style='height:{max(r['Сумма'] / max_v * 100, 4):.0f}%'></div>"
-            for r in inv_years
-        )
-        labels_html = "".join(f"<span>{r['Год']}</span>" for r in inv_years)
-        total_invested_all = sum(r["Сумма"] for r in inv_years)
-        no_bars_html = "<div style='color:#9a9ca6;font-size:.8rem'>Нет данных</div>"
-        st.markdown(
-            "<div class='cn-card'>"
-            "<div class='cn-section-title'>Инвестировано по годам</div>"
-            f"<div class='cn-card-amt'>{_esc(_fmt_pos(total_invested_all))} всего</div>"
-            f"<div class='cn-minibar-row'>{bars_html or no_bars_html}</div>"
-            f"<div class='cn-minibar-labels'>{labels_html}</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-    with r2c2:
-        recent = filtered.sort_values("Дата", ascending=False).head(5) if "Дата" in filtered.columns else filtered.head(5)
-        rows_html = []
-        for _, row in recent.iterrows():
-            cat = row.get("Категория", OTHER)
-            icon = CATEGORY_ICONS.get(cat, "📄")
-            name = _deal_label(row)
-            date_str = row["Дата"].strftime("%d.%m.%Y") if pd.notna(row.get("Дата")) else ""
-            signed = _signed_amount(row)
-            amount_str = _fmt_signed(signed) if pd.notna(signed) else "—"
-            cls = "pos" if (pd.notna(signed) and signed >= 0) else "neg"
-            rows_html.append(
-                "<div class='cn-tx-row'>"
-                "<div class='cn-tx-left'>"
-                f"<div class='cn-tx-icon'>{icon}</div>"
-                f"<div class='cn-tx-text'><div class='cn-tx-name'>{_esc(name)}</div>"
-                f"<div class='cn-tx-date'>{_esc(date_str)}</div></div>"
-                "</div>"
-                f"<div class='cn-tx-amount {cls}'>{_esc(amount_str)}</div>"
-                "</div>"
+        if inv_years:
+            year_df = pd.DataFrame(inv_years)
+            total_invested_all = year_df["Сумма"].sum()
+            st.markdown(
+                f"<div class='cn-card-amt' style='margin-bottom:6px'>{_esc(_fmt_pos(total_invested_all))} всего</div>",
+                unsafe_allow_html=True,
             )
-        rows_joined = "".join(rows_html)
-        no_rows_html = "<div style='color:#9a9ca6;font-size:.85rem;margin-top:10px'>Нет сделок</div>"
-        st.markdown(
-            "<div class='cn-card'>"
-            "<div class='cn-section-title'>Сделки</div>"
-            f"{rows_joined or no_rows_html}"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+            latest_year = year_df["Год"].max()
+            bar_colors = ["#1DBF73" if y == latest_year else "#E3E0D8" for y in year_df["Год"]]
+            fig = px.bar(year_df, x="Год", y="Сумма")
+            fig.update_traces(
+                marker_color=bar_colors,
+                customdata=year_df["Сумма"].apply(_fmt_pos),
+                hovertemplate="<b>%{x}</b><br>%{customdata}<extra></extra>",
+            )
+            fig.update_xaxes(type="category", title=None)
+            fig.update_yaxes(title="$")
+            fig.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10), height=280,
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            )
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+        else:
+            st.markdown("<div style='color:#9a9ca6;font-size:.85rem'>Нет данных</div>", unsafe_allow_html=True)
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
