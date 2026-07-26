@@ -264,7 +264,8 @@ COINACO_CSS = """
 .cn-risk-sub{text-align:center;color:#9a9ca6;font-size:.75rem;margin-top:2px}
 
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_chart_"]{background:#fff;border-radius:20px;padding:20px 20px 6px}
-.st-key-dash_coinaco [class*="st-key-dash_coinaco_side_"]{background:#fff;border-radius:20px;padding:20px;margin-bottom:16px}
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_side_"]{background:#fff;border-radius:20px;padding:20px;margin-bottom:16px;height:100%;box-sizing:border-box}
+.st-key-dash_coinaco [class*="st-key-dash_coinaco_side_"] [data-testid="stVerticalBlock"]{height:100%}
 .st-key-dash_coinaco [class*="st-key-dash_coinaco_events_"]{background:#fff;border-radius:20px;padding:6px 20px 4px;margin-bottom:16px}
 </style>
 """
@@ -518,7 +519,7 @@ with st.container(key="dash_coinaco"):
                 )
                 yearly["Прирост"] = yearly["value"].diff()
                 yearly["Прирост_pct"] = yearly["value"].pct_change() * 100
-                yearly = yearly.dropna(subset=["Прирост"]).sort_values("Прирост_pct", ascending=False)
+                yearly = yearly.dropna(subset=["Прирост"]).sort_values("Год", ascending=False)
                 if yearly.empty:
                     st.markdown("<div class='cn-risk-sub'>Недостаточно данных.</div>", unsafe_allow_html=True)
                 else:
