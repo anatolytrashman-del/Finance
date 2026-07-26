@@ -151,7 +151,7 @@ COINACO_CSS = """
 
 .cn-section-title{font-weight:700;font-size:1rem;color:#17171C;margin-bottom:4px}
 
-.st-key-deals_coinaco_chart_invested{background:#fff;border-radius:20px;padding:20px 20px 6px}
+.st-key-deals_coinaco [class*="st-key-deals_coinaco_chart_"]{background:#fff;border-radius:20px;padding:20px 20px 6px;height:100%;box-sizing:border-box}
 .st-key-deals_coinaco_table{background:#fff;border-radius:20px;padding:20px}
 </style>
 """
@@ -210,13 +210,14 @@ with st.container(key="deals_coinaco"):
 
     invested = _cat_sum(INVEST)
     sold_sum = _cat_sum(SALE)
+    dividends_sum = _cat_sum(DIVIDEND)
     profit_total = filtered[PROFIT_COL].sum() if PROFIT_COL in filtered.columns else 0
 
-    # ---------------- Row 1: три отдельные карточки-цифры ----------------
+    # ---------------- Row 1: четыре отдельные карточки-цифры ----------------
     period_label = "за всё время" if period == "Все время" else f"за {period}"
     profit_color = "#1DBF73" if profit_total >= 0 else "#E5484D"
 
-    r1c1, r1c2, r1c3 = st.columns(3)
+    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
     with r1c1:
         st.markdown(
             "<div class='cn-card'>"
@@ -244,10 +245,19 @@ with st.container(key="deals_coinaco"):
             "</div>",
             unsafe_allow_html=True,
         )
+    with r1c4:
+        st.markdown(
+            "<div class='cn-card'>"
+            "<div class='cn-label'>Дивиденды</div>"
+            f"<div class='cn-big-number'>{_esc(_fmt_pos(dividends_sum))}</div>"
+            f"<div class='cn-card-amt'>{_esc(period_label)}</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
-    # ---------------- Row 2: Инвестировано по годам / Сделки ----------------
+    # ---------------- Row 2: Инвестировано / Дивиденды по годам ----------------
     def _year_rows(entity, src_df):
         src = src_df[src_df["Категория"] == entity]
         if selected_types and ASSET_COL in src.columns:
@@ -260,18 +270,21 @@ with st.container(key="deals_coinaco"):
         g["Год"] = g["Год"].astype(int)
         return g.sort_values("Год").to_dict("records")
 
-    with st.container(key="deals_coinaco_chart_invested"):
-        st.markdown("<div class='cn-section-title'>Инвестировано по годам</div>", unsafe_allow_html=True)
-        inv_years = _year_rows(INVEST, df)
-        if inv_years:
-            year_df = pd.DataFrame(inv_years)
-            total_invested_all = year_df["Сумма"].sum()
+    def _year_bar_chart(container_key, title, entity, bar_color):
+        with st.container(key=container_key):
+            st.markdown(f"<div class='cn-section-title'>{_esc(title)}</div>", unsafe_allow_html=True)
+            rows = _year_rows(entity, df)
+            if not rows:
+                st.markdown("<div style='color:#9a9ca6;font-size:.85rem'>Нет данных</div>", unsafe_allow_html=True)
+                return
+            year_df = pd.DataFrame(rows)
+            total_all = year_df["Сумма"].sum()
             st.markdown(
-                f"<div class='cn-card-amt' style='margin-bottom:6px'>{_esc(_fmt_pos(total_invested_all))} всего</div>",
+                f"<div class='cn-card-amt' style='margin-bottom:6px'>{_esc(_fmt_pos(total_all))} всего</div>",
                 unsafe_allow_html=True,
             )
             latest_year = year_df["Год"].max()
-            bar_colors = ["#1DBF73" if y == latest_year else "#E3E0D8" for y in year_df["Год"]]
+            bar_colors = [bar_color if y == latest_year else "#E3E0D8" for y in year_df["Год"]]
             fig = px.bar(year_df, x="Год", y="Сумма")
             fig.update_traces(
                 marker_color=bar_colors,
@@ -284,9 +297,13 @@ with st.container(key="deals_coinaco"):
                 margin=dict(l=10, r=10, t=10, b=10), height=280,
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             )
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-        else:
-            st.markdown("<div style='color:#9a9ca6;font-size:.85rem'>Нет данных</div>", unsafe_allow_html=True)
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    r2c1, r2c2 = st.columns(2)
+    with r2c1:
+        _year_bar_chart("deals_coinaco_chart_invested", "Инвестировано по годам", INVEST, "#1DBF73")
+    with r2c2:
+        _year_bar_chart("deals_coinaco_chart_dividends", "Дивиденды по годам", DIVIDEND, "#3B82F6")
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
