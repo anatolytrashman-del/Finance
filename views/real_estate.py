@@ -8,7 +8,7 @@ from config import YANDEX_MAPS_API_KEY
 from data_source import load_real_estate, load_real_estate_sold, sidebar_refresh_control
 from parsers import parse_area, parse_money
 from rates_widget import render_sidebar_rates
-from theme import card, kpi_card, kpi_row, page, section_title
+from theme import card, kpi_card, kpi_row, page, section_title, table
 
 sidebar_refresh_control()
 render_sidebar_rates()
@@ -237,13 +237,12 @@ with page("real_estate", "🏠", "Портфолио объектов недви
     # иначе при сортировке по столбцу она уезжает в середину)
     with card("real_estate", "table"):
         section_title("📋 Объекты")
-        st.dataframe(
-            display,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                PAID_COL: st.column_config.ProgressColumn("Оплачено", format="%.0f%%", min_value=0, max_value=100)
-            },
+        _money_cols = {PURCHASE_COL, MARKET_COL, LIABILITIES_COL, PRICE_PER_UNIT_COL, CURRENT_PRICE_PER_UNIT_COL, GROWTH_COL}
+        table(
+            [(c, c) for c in display.columns],
+            display.to_dict("records"),
+            progress_cols={PAID_COL: 100} if PAID_COL in display.columns else None,
+            right_cols={c for c in _money_cols if c in display.columns},
         )
 
     # Итоги по портфелю — отдельным блоком под таблицей
@@ -322,7 +321,12 @@ with page("real_estate", "🏠", "Портфолио объектов недви
         st.divider()
         with card("real_estate", "sold"):
             section_title("💰 Проданные объекты")
-            st.dataframe(sdisp, width="stretch", hide_index=True)
+            _sold_money_cols = {PURCHASE_COL, SALE_COL, PROFIT_COL, YIELD_COL}
+            table(
+                [(c, c) for c in sdisp.columns],
+                sdisp.to_dict("records"),
+                right_cols={c for c in _sold_money_cols if c in sdisp.columns},
+            )
 
         section_title("💼 Итого по продажам")
         kpi_row([
