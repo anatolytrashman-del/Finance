@@ -113,6 +113,50 @@ def _signed_amount(row):
     return -abs(amt) if row.get("Категория") == INVEST else abs(amt)
 
 
+def _table_html(columns, rows, badge_cols=None, color_cols=None, right_cols=None):
+    """Кастомная HTML-таблица вместо st.dataframe — та же идея, что в
+    theme.table() для страниц на общем модуле, но своя копия под cn-*
+    палитру: эта страница самостоятельная и theme.py не импортирует.
+
+    badge_cols: {col_key: {value: (bg, color)}} — скруглённая цветная плашка.
+    color_cols: {col_key: fn(value) -> color_or_None} — просто красит текст.
+    right_cols: набор col_key для выравнивания по правому краю.
+    """
+    badge_cols = badge_cols or {}
+    color_cols = color_cols or {}
+    right_cols = right_cols or set()
+    head = "".join(
+        f"<th class='cn-table-right'>{_esc(label)}</th>" if key in right_cols else f"<th>{_esc(label)}</th>"
+        for key, label in columns
+    )
+    body = []
+    for row in rows:
+        cells = []
+        for key, _label in columns:
+            val = row.get(key, "")
+            cls = " class='cn-table-right'" if key in right_cols else ""
+            if key in badge_cols:
+                bg, color = badge_cols[key].get(val, ("#F1EFEA", "#6b6f7a"))
+                safe = _esc(val).replace("$", r"\$")
+                cells.append(
+                    f"<td{cls}><span style='display:inline-block;background:{bg};color:{color};"
+                    "padding:4px 14px;border-radius:16px;font-size:.8rem;font-weight:700'>"
+                    f"{safe}</span></td>"
+                )
+            elif key in color_cols:
+                color = color_cols[key](val)
+                style = f" style='color:{color};font-weight:600'" if color else ""
+                cells.append(f"<td{cls}{style}>{_esc(val)}</td>")
+            else:
+                cells.append(f"<td{cls}>{_esc(val)}</td>")
+        body.append(f"<tr>{''.join(cells)}</tr>")
+    st.markdown(
+        "<div class='cn-table-wrap'><table class='cn-table'>"
+        f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ============================ Coinaco-style дизайн (финальный стиль платформы) ============================
 # Самостоятельная вёрстка (тот же приём, что и в views/dashboard.py) — своя
 # CSS-палитра токенов под ключом страницы, без завязки на общий theme.py.
@@ -153,6 +197,16 @@ COINACO_CSS = """
 
 .st-key-deals_coinaco [class*="st-key-deals_coinaco_chart_"]{background:#fff;border-radius:20px;padding:20px 20px 6px;height:100%;box-sizing:border-box}
 .st-key-deals_coinaco_table{background:#fff;border-radius:20px;padding:20px}
+
+.cn-table-wrap{overflow-x:auto}
+.cn-table{width:100%;border-collapse:collapse}
+.cn-table th{
+  text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.05em;color:#9a9ca6;padding:0 14px 10px;white-space:nowrap;
+}
+.cn-table td{padding:12px 14px;font-size:.87rem;color:#17171C;border-top:1px solid #F1EFEA;white-space:nowrap}
+.cn-table tr:first-child td{border-top:none}
+.cn-table th.cn-table-right, .cn-table td.cn-table-right{text-align:right}
 </style>
 """
 
@@ -323,19 +377,22 @@ with st.container(key="deals_coinaco"):
         cols.insert(insert_at, "Категория")
         display = display[cols]
 
-    def _style_row(row):
-        styles = [""] * len(row)
-        if "Категория" in row.index:
-            color, bg = CATEGORY_COLORS.get(row["Категория"], CATEGORY_COLORS[OTHER])
-            styles[row.index.get_loc("Категория")] = f"background-color:{bg};color:{color};font-weight:600"
-        if "Сумма" in row.index:
-            val = str(row["Сумма"]).strip()
-            if val.startswith("-"):
-                styles[row.index.get_loc("Сумма")] = "color:#ef4444;font-weight:600"
-            elif val.startswith("$"):
-                styles[row.index.get_loc("Сумма")] = "color:#10b981;font-weight:600"
-        return styles
+    _category_badge_colors = {cat: (bg, color) for cat, (color, bg) in CATEGORY_COLORS.items()}
+
+    def _amount_color(val):
+        val = str(val).strip()
+        if val.startswith("-"):
+            return "#E5484D"
+        if val.startswith("$"):
+            return "#1DBF73"
+        return None
 
     with st.container(key="deals_coinaco_table"):
         st.markdown("<div class='cn-section-title' style='margin-bottom:12px'>Все сделки</div>", unsafe_allow_html=True)
-        st.dataframe(display.style.apply(_style_row, axis=1), width="stretch", hide_index=True)
+        _table_html(
+            [(c, c) for c in display.columns],
+            display.to_dict("records"),
+            badge_cols={"Категория": _category_badge_colors},
+            color_cols={"Сумма": _amount_color},
+            right_cols={"Сумма"},
+        )
