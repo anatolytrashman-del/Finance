@@ -8,7 +8,7 @@ from data_source import load_real_estate, sidebar_refresh_control
 from docs_store import load_documents, save_documents
 from rates_widget import render_sidebar_rates
 from sale_finmodel import object_choices
-from theme import card, esc, page, section_title
+from theme import card, page, section_title
 
 sidebar_refresh_control()
 render_sidebar_rates()
@@ -99,23 +99,6 @@ with page("documents", "🗂️", "Архив документов", "Файлы
         st.rerun()
 
 
-    # Кастомная HTML-таблица (theme.table()) не умеет встраивать нативные
-    # кнопки внутрь ячейки — а тут нужен клик именно по конкретной строке
-    # (редактировать/удалить). Поэтому строки собраны через st.columns() с той
-    # же типографикой, что и theme.table() (th/td), а последние две колонки —
-    # обычные кнопки Streamlit.
-    DOC_COL_WIDTHS = [1.3, 0.9, 0.9, 0.9, 2.2, 0.9, 0.4, 0.4]
-    DOC_HEADERS = ["Тип документа", "Дата", "Номер", "Сумма", "Суть — кратко", "Ссылка", "", ""]
-
-    def _doc_th(text):
-        return (
-            "<div style='font-size:.68rem;font-weight:700;text-transform:uppercase;"
-            f"letter-spacing:.05em;color:#9a9ca6;padding:0 0 8px'>{esc(text)}</div>"
-        )
-
-    def _doc_td(text):
-        return f"<div style='font-size:.87rem;color:#17171C;padding:10px 0'>{esc(text)}</div>"
-
     for chosen in choices:
         obj_docs = [d for d in documents if d.get("object") == chosen["key"]]
         with card("documents", f"obj_{chosen['key']}"):
@@ -125,37 +108,39 @@ with page("documents", "🗂️", "Архив документов", "Файлы
                 continue
 
             obj_docs = sorted(obj_docs, key=lambda d: d.get("date") or "")
+            table = pd.DataFrame([
+                {
+                    "Тип документа": d.get("type", ""),
+                    "Дата": _fmt_date(d.get("date")),
+                    "Номер": d.get("number", "") or "—",
+                    "Сумма": _fmt_amount(d.get("amount"), d.get("currency", "$")),
+                    "Суть — кратко": d.get("summary", "") or "—",
+                    "Ссылка": d.get("link", ""),
+                }
+                for d in obj_docs
+            ])
+            table_key = f"docs_table_{chosen['key']}"
+            event = st.dataframe(
+                table, width="stretch", hide_index=True,
+                column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
+                on_select="rerun", selection_mode="single-row", key=table_key,
+            )
+            selected_rows = event.selection.rows if hasattr(event, "selection") else []
 
-            header_cols = st.columns(DOC_COL_WIDTHS)
-            for col, label in zip(header_cols, DOC_HEADERS):
-                if label:
-                    col.markdown(_doc_th(label), unsafe_allow_html=True)
-
-            for d in obj_docs:
-                row = st.columns(DOC_COL_WIDTHS)
-                row[0].markdown(_doc_td(d.get("type", "")), unsafe_allow_html=True)
-                row[1].markdown(_doc_td(_fmt_date(d.get("date"))), unsafe_allow_html=True)
-                row[2].markdown(_doc_td(d.get("number", "") or "—"), unsafe_allow_html=True)
-                row[3].markdown(_doc_td(_fmt_amount(d.get("amount"), d.get("currency", "$"))), unsafe_allow_html=True)
-                row[4].markdown(_doc_td(d.get("summary", "") or "—"), unsafe_allow_html=True)
-                link = d.get("link", "")
-                if link:
-                    row[5].markdown(
-                        "<div style='padding:10px 0'><a href='"
-                        f"{esc(link)}' target='_blank' rel='noopener' "
-                        "style='color:#17171C;font-weight:600;text-decoration:underline;font-size:.87rem'>"
-                        "Открыть</a></div>",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    row[5].markdown(_doc_td("—"), unsafe_allow_html=True)
-
+            if not selected_rows:
+                st.caption("Выбери строку в таблице, чтобы отредактировать или удалить документ.")
+            else:
+                d = obj_docs[selected_rows[0]]
                 edit_key = f"doc_editing_{d['id']}"
-                if row[6].button("✏️", key=f"doc_edit_btn_{d['id']}", help="Редактировать", type="tertiary"):
+                bc1, bc2, _bc3 = st.columns([1, 1, 6])
+                if bc1.button("✏️ Редактировать", key=f"doc_edit_btn_{d['id']}", type="tertiary"):
                     st.session_state[edit_key] = not st.session_state.get(edit_key, False)
                     st.rerun()
-                if row[7].button("🗑", key=f"doc_del_btn_{d['id']}", help="Удалить", type="tertiary"):
+                if bc2.button("🗑 Удалить", key=f"doc_del_btn_{d['id']}", type="tertiary"):
                     st.session_state["documents"] = [x for x in documents if x["id"] != d["id"]]
+                    # строка, на которую указывал выбор, могла исчезнуть/сдвинуться —
+                    # сбрасываем выбор, а не оставляем указывать на что попало
+                    st.session_state.pop(table_key, None)
                     _save_and_rerun()
 
                 if st.session_state.get(edit_key):
@@ -209,6 +194,7 @@ with page("documents", "🗂️", "Архив документов", "Файлы
                             d["summary"] = e_summary.strip()
                             d["link"] = e_link.strip()
                             st.session_state[edit_key] = False
+                            st.session_state.pop(table_key, None)
                             _save_and_rerun()
                         elif cancel_clicked:
                             st.session_state[edit_key] = False
