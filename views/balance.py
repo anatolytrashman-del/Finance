@@ -1,8 +1,9 @@
+import pandas as pd
 import streamlit as st
 
 from data_source import load_balance, sidebar_refresh_control
 from rates_widget import render_sidebar_rates
-from theme import card, kpi_card, kpi_row, page, section_title, table
+from theme import card, kpi_card, kpi_row, page, section_title
 
 sidebar_refresh_control()
 render_sidebar_rates()
@@ -36,20 +37,18 @@ def _cat_table(rows, frozen=False):
     if not rows:
         st.caption("Нет строк.")
         return
-    rows_data = [
-        {
-            "cat": cat,
-            "asset": ("🔒 " + it["name"]) if frozen else it["name"],
-            "usd": _fmt_usd(it["usd"]),
-            "orig": _fmt_orig(it["orig"], it["currency"]),
-        }
-        for cat, it in rows
-    ]
-    table(
-        [("cat", "Категория"), ("asset", "Актив"), ("usd", "В $"), ("orig", "Оригинал")],
-        rows_data,
-        right_cols={"usd", "orig"},
+    table = pd.DataFrame(
+        [
+            {
+                "Категория": cat,
+                "Актив": ("🔒 " + it["name"]) if frozen else it["name"],
+                "В $": _fmt_usd(it["usd"]),
+                "Оригинал": _fmt_orig(it["orig"], it["currency"]),
+            }
+            for cat, it in rows
+        ]
     )
+    st.dataframe(table, width="stretch", hide_index=True)
 
 
 def _block(page_key, suffix, title, icon, rows, frozen=False):
@@ -85,17 +84,21 @@ with page("balance", "⚖️", "Баланс", f"Данные на срез: {ba
     composition = {k: v for k, v in composition.items() if v > 0}
     comp_total = sum(composition.values())
     if composition:
-        comp_rows = [
-            {"block": k, "sum": _fmt_usd(v), "share": (v / comp_total * 100) if comp_total else 0}
-            for k, v in sorted(composition.items(), key=lambda kv: -kv[1])
-        ]
+        comp_df = pd.DataFrame(
+            [
+                {"Блок": k, "Сумма": _fmt_usd(v), "Доля": (v / comp_total * 100) if comp_total else 0}
+                for k, v in sorted(composition.items(), key=lambda kv: -kv[1])
+            ]
+        )
         with card("balance", "composition"):
             section_title("📊 Состав капитала")
-            table(
-                [("block", "Блок"), ("sum", "Сумма"), ("share", "Доля")],
-                comp_rows,
-                progress_cols={"share": 100},
-                right_cols={"sum"},
+            st.dataframe(
+                comp_df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Доля": st.column_config.ProgressColumn("Доля", format="%.1f%%", min_value=0, max_value=100),
+                },
             )
 
     # ---------------- Текущие счета ----------------

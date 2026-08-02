@@ -86,22 +86,6 @@ def _page_css(key):
   background:#17171C !important;border:none !important;border-radius:999px !important;
   box-shadow:none !important;
 }}
-
-.st-key-{key} .tfo-table-wrap{{overflow-x:auto}}
-.st-key-{key} .tfo-table{{width:100%;border-collapse:collapse}}
-.st-key-{key} .tfo-table th{{
-  text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;
-  letter-spacing:.05em;color:#9a9ca6;padding:0 14px 10px;white-space:nowrap;
-}}
-.st-key-{key} .tfo-table td{{
-  padding:12px 14px;font-size:.87rem;color:#17171C;border-top:1px solid #F1EFEA;white-space:nowrap;
-}}
-.st-key-{key} .tfo-table tr:first-child td{{border-top:none}}
-.st-key-{key} .tfo-table th.tfo-table-right, .st-key-{key} .tfo-table td.tfo-table-right{{text-align:right}}
-.st-key-{key} .tfo-table-progress{{display:flex;align-items:center;gap:8px;min-width:110px}}
-.st-key-{key} .tfo-table-progress-track{{flex:1;height:6px;border-radius:999px;background:#F1EFEA;overflow:hidden}}
-.st-key-{key} .tfo-table-progress-fill{{height:100%;background:#1DBF73;border-radius:999px}}
-.st-key-{key} .tfo-table a{{color:#17171C;font-weight:600;text-decoration:underline}}
 </style>
 """
 
@@ -191,66 +175,6 @@ def kpi_card(icon, label, value, deltas=None, value_color=None, icon_bg=None):
 
 def kpi_row(cards_html):
     st.markdown("<div class='tfo-kpi-row'>" + "".join(cards_html) + "</div>", unsafe_allow_html=True)
-
-
-def table(columns, rows, badge_cols=None, progress_cols=None, raw_cols=None, right_cols=None):
-    """Кастомная HTML-таблица вместо st.dataframe — нужна ради скруглённых
-    цветных плашек (badge) и прогресс-баров в ячейках, которые нативный
-    st.dataframe не умеет рисовать (только красит фон ячейки целиком, без
-    компактной пилюли). Без сортировки по клику на заголовок и без resize
-    колонок мышью — если для конкретной таблицы это критично, там стоит
-    оставить/вернуть st.dataframe.
-
-    columns: список (key, label).
-    rows: список dict — значения уже отформатированы вызывающим кодом в
-    строки, готовые к показу (кроме badge_cols/progress_cols/raw_cols —
-    для них своя логика ниже).
-    badge_cols: {col_key: {value: (bg, color)}} — рендерит ячейку через
-    pill() вместо обычного текста (color по умолчанию — NEUTRAL, если
-    точного значения нет в словаре).
-    progress_cols: {col_key: max_value} — рендерит ячейку как мини
-    прогресс-бар с процентом (значение row[col_key] — число 0..max_value).
-    raw_cols: набор col_key, чьи значения — уже готовый безопасный HTML
-    (например, ссылка <a href=...>Открыть</a>), не экранируется повторно.
-    right_cols: набор col_key для выравнивания по правому краю (суммы и т.п.)
-    """
-    badge_cols = badge_cols or {}
-    progress_cols = progress_cols or {}
-    raw_cols = raw_cols or set()
-    right_cols = right_cols or set()
-
-    head = "".join(
-        f"<th class='tfo-table-right'>{esc(label)}</th>" if key in right_cols else f"<th>{esc(label)}</th>"
-        for key, label in columns
-    )
-    body_rows = []
-    for row in rows:
-        cells = []
-        for key, _ in columns:
-            val = row.get(key, "")
-            cls = " class='tfo-table-right'" if key in right_cols else ""
-            if key in badge_cols:
-                colors = badge_cols[key].get(val, NEUTRAL)
-                cells.append(f"<td{cls}>{pill(val, colors)}</td>")
-            elif key in progress_cols:
-                max_v = progress_cols[key] or 100
-                pct = max(0.0, min(100.0, (float(val) / max_v * 100) if max_v and val not in (None, "") else 0.0))
-                cells.append(
-                    f"<td{cls}><div class='tfo-table-progress'>"
-                    f"<div class='tfo-table-progress-track'>"
-                    f"<div class='tfo-table-progress-fill' style='width:{pct:.0f}%'></div></div>"
-                    f"<span>{pct:.0f}%</span></div></td>"
-                )
-            elif key in raw_cols:
-                cells.append(f"<td{cls}>{val}</td>")
-            else:
-                cells.append(f"<td{cls}>{esc(val)}</td>")
-        body_rows.append(f"<tr>{''.join(cells)}</tr>")
-    st.markdown(
-        "<div class='tfo-table-wrap'><table class='tfo-table'>"
-        f"<thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody></table></div>",
-        unsafe_allow_html=True,
-    )
 
 
 def pill(text, colors=NEUTRAL):
