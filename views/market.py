@@ -26,8 +26,7 @@ from market_store import (
     save_listings,
     save_seen,
 )
-from theme import card, esc, page, section_title
-from theme import table as html_table
+from theme import card, page, section_title
 
 with page(
     "market", "🏷️", "Анализ рынка",
@@ -47,26 +46,6 @@ with page(
         if v is None or pd.isna(v):
             return "—"
         return f"€{v:,.0f}".replace(",", " ")
-
-
-    def _link_html(url):
-        if not url or pd.isna(url):
-            return "—"
-        return (
-            f"<a href='{esc(url)}' target='_blank' rel='noopener' "
-            "style='color:#17171C;font-weight:600;text-decoration:underline'>Открыть</a>"
-        )
-
-
-    def _th_html(text):
-        return (
-            "<div style='font-size:.68rem;font-weight:700;text-transform:uppercase;"
-            f"letter-spacing:.05em;color:#9a9ca6;padding:0 0 8px'>{esc(text)}</div>"
-        )
-
-
-    def _td_html(text):
-        return f"<div style='font-size:.87rem;color:#17171C;padding:10px 0'>{esc(text)}</div>"
 
 
     BIR_CATEGORY_ORDER = ["Квартиры и апартаменты", "Коммерческие помещения", "Кладовые", "Машиноместа"]
@@ -196,25 +175,19 @@ with page(
                             }
                         )
                     if summary:
-                        html_table(
-                            [("Категория", "Категория"), ("Юнитов", "Юнитов"),
-                             ("Средняя цена", "Средняя цена"), ("Мин", "Мин"), ("Макс", "Макс")],
-                            summary,
-                            right_cols={"Юнитов", "Средняя цена", "Мин", "Макс"},
-                        )
+                        st.dataframe(pd.DataFrame(summary), width="stretch", hide_index=True)
             if q_df.empty:
                 continue
 
             new_count = int(q_df["is_new"].sum())
             badge = f" · 🆕 новых: {new_count}" if new_count else ""
             with st.expander(f"Все юниты — {quartal} ({len(q_df)}){badge}"):
-                bir_units = q_df.copy().sort_values(["is_new", "category", "price_eur"], ascending=[False, True, True])
-                bir_units["Цена"] = bir_units["price_eur"].apply(_fmt_eur)
-                bir_units["Цена за м²"] = bir_units["ppm_eur"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
-                bir_units["Цена (быстрая оплата)"] = bir_units["price_eur_fast"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
-                bir_units["Статус"] = bir_units["is_new"].apply(lambda v: "🆕 Новое" if v else "")
-                bir_units["Ссылка"] = bir_units["link"].apply(_link_html)
-                bir_units = bir_units.rename(
+                table = q_df.copy().sort_values(["is_new", "category", "price_eur"], ascending=[False, True, True])
+                table["Цена"] = table["price_eur"].apply(_fmt_eur)
+                table["Цена за м²"] = table["ppm_eur"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
+                table["Цена (быстрая оплата)"] = table["price_eur_fast"].apply(lambda v: _fmt_eur(v) if pd.notna(v) else "—")
+                table["Статус"] = table["is_new"].apply(lambda v: "🆕 Новое" if v else "")
+                table = table.rename(
                     columns={
                         "house": "Дом",
                         "category": "Категория",
@@ -223,15 +196,16 @@ with page(
                         "entrance": "Подъезд",
                         "area": "Площадь, м²",
                         "rooms": "Комнат",
+                        "link": "Ссылка",
                     }
                 )
                 visible_cols = ["Статус", "Дом", "Категория", "№ помещения", "Этаж", "Подъезд", "Площадь, м²",
                                  "Комнат", "Цена", "Цена за м²", "Цена (быстрая оплата)", "Ссылка"]
-                html_table(
-                    [(c, c) for c in visible_cols],
-                    bir_units[visible_cols].fillna("").to_dict("records"),
-                    raw_cols={"Ссылка"},
-                    right_cols={"Цена", "Цена за м²", "Цена (быстрая оплата)"},
+                st.dataframe(
+                    table[visible_cols],
+                    width="stretch",
+                    hide_index=True,
+                    column_config={"Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть")},
                 )
 
         bir_archive = load_bir_archive()
@@ -258,12 +232,11 @@ with page(
                     }
                 )
                 badf = badf.sort_values("Ушло в архив", ascending=False)
-                _bir_archive_cols = ["Квартал", "Дом", "Категория", "№ помещения", "Площадь, м²", "Цена",
-                                     "Причина", "Появилось", "Ушло в архив", "Срок экспозиции, дней"]
-                html_table(
-                    [(c, c) for c in _bir_archive_cols],
-                    badf[_bir_archive_cols].fillna("").to_dict("records"),
-                    right_cols={"Площадь, м²", "Цена", "Срок экспозиции, дней"},
+                st.dataframe(
+                    badf[["Квартал", "Дом", "Категория", "№ помещения", "Площадь, м²", "Цена",
+                          "Причина", "Появилось", "Ушло в архив", "Срок экспозиции, дней"]],
+                    width="stretch",
+                    hide_index=True,
                 )
 
     st.divider()
@@ -484,28 +457,21 @@ with page(
                             }
                         )
                 if summary:
-                    html_table(
-                        [("Сделка", "Сделка"), ("Категория", "Категория"), ("Объявлений", "Объявлений"),
-                         ("Средняя цена метра", "Средняя цена метра"), ("Медиана", "Медиана"),
-                         ("Мин", "Мин"), ("Макс", "Макс")],
-                        summary,
-                        right_cols={"Объявлений", "Средняя цена метра", "Медиана", "Мин", "Макс"},
-                    )
+                    st.dataframe(pd.DataFrame(summary), width="stretch", hide_index=True)
         if sub.empty:
             continue
 
         new_count = int(sub["is_new"].sum())
         badge = f" · 🆕 новых: {new_count}" if new_count else ""
         with st.expander(f"Все объявления — {q_name} ({len(sub)}){badge}"):
-            listings_tbl = sub.copy()
-            listings_tbl = listings_tbl.sort_values(
-                ["is_new", "deal", "category", "ppm"], ascending=[False, True, True, True]
-            )
-            listings_tbl["Цена"] = listings_tbl["price_usd"].apply(_fmt_money)
-            listings_tbl["Цена метра"] = listings_tbl["ppm"].apply(lambda v: _fmt_money(v) if pd.notna(v) else "—")
-            listings_tbl["Статус"] = listings_tbl["is_new"].apply(lambda v: "🆕 Новое" if v else "")
-            listings_tbl["Этаж"] = listings_tbl.apply(_fmt_floor, axis=1)
-            listings_tbl = listings_tbl.rename(
+            table = sub.copy()
+            table = table.sort_values(["is_new", "deal", "category", "ppm"], ascending=[False, True, True, True])
+            table["Цена"] = table["price_usd"].apply(_fmt_money)
+            table["Цена метра"] = table["ppm"].apply(lambda v: _fmt_money(v) if pd.notna(v) else "—")
+            table["Статус"] = table["is_new"].apply(lambda v: "🆕 Новое" if v else "")
+            table["Комментарий"] = table["id"].apply(lambda i: comments.get(i, ""))
+            table["Этаж"] = table.apply(_fmt_floor, axis=1)
+            table = table.rename(
                 columns={
                     "address": "Адрес",
                     "deal": "Сделка",
@@ -517,34 +483,24 @@ with page(
                     "link": "Ссылка",
                 }
             )
-            display_cols = ["Статус", "Адрес", "Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²",
-                             "Этаж", "Цена", "Цена метра", "Размещено", "Ссылка"]
-            listings_tbl = listings_tbl[["id", *display_cols]].fillna("")
-
-            # Кастомная HTML-таблица не умеет встраивать нативные поля ввода —
-            # а «Комментарий» тут редактируется прямо в ячейке. Поэтому строки
-            # собраны через st.columns() (та же типографика th/td, что и в
-            # html_table), а последняя колонка — обычный st.text_input.
-            LISTING_COL_WIDTHS = [0.7, 1.1, 0.7, 1.0, 0.7, 1.6, 0.8, 0.6, 0.8, 0.8, 0.9, 0.7, 1.6]
-            LISTING_HEADERS = [*display_cols, "Комментарий"]
-
-            header_cols = st.columns(LISTING_COL_WIDTHS)
-            for col, label in zip(header_cols, LISTING_HEADERS):
-                col.markdown(_th_html(label), unsafe_allow_html=True)
-
+            visible_cols = ["Статус", "Адрес", "Сделка", "Категория", "Источник", "Заголовок", "Площадь, м²",
+                             "Этаж", "Цена", "Цена метра", "Размещено", "Ссылка", "Комментарий"]
+            edited = st.data_editor(
+                table[["id", *visible_cols]],
+                key=f"listings_editor_{q_name}",
+                width="stretch",
+                hide_index=True,
+                column_order=visible_cols,
+                disabled=[c for c in visible_cols if c != "Комментарий"],
+                column_config={
+                    "Ссылка": st.column_config.LinkColumn("Ссылка", display_text="Открыть"),
+                    "Комментарий": st.column_config.TextColumn("Комментарий", width="medium"),
+                },
+            )
             changed = False
-            for _, row in listings_tbl.iterrows():
+            for _, row in edited.iterrows():
                 rid = row["id"]
-                row_cols = st.columns(LISTING_COL_WIDTHS)
-                for col, key in zip(row_cols[:-1], display_cols):
-                    if key == "Ссылка":
-                        col.markdown(_link_html(row[key]), unsafe_allow_html=True)
-                    else:
-                        col.markdown(_td_html(row[key]), unsafe_allow_html=True)
-                new_comment = row_cols[-1].text_input(
-                    "Комментарий", value=comments.get(rid, ""), key=f"comment_{q_name}_{rid}",
-                    label_visibility="collapsed",
-                ).strip()
+                new_comment = (row.get("Комментарий") or "").strip()
                 if comments.get(rid, "") != new_comment:
                     if new_comment:
                         comments[rid] = new_comment
@@ -585,11 +541,10 @@ with page(
                 }
             )
             adf = adf.sort_values("Ушло в архив", ascending=False)
-            _archive_cols = ["Адрес", "Сделка", "Категория", "Заголовок", "Площадь, м²", "Цена", "Цена метра",
-                             "Причина", "Появилось", "Ушло в архив", "Срок экспозиции, дней"]
-            html_table(
-                [(c, c) for c in _archive_cols],
-                adf[_archive_cols].fillna("").to_dict("records"),
-                right_cols={"Площадь, м²", "Цена", "Цена метра", "Срок экспозиции, дней"},
+            st.dataframe(
+                adf[["Адрес", "Сделка", "Категория", "Заголовок", "Площадь, м²", "Цена", "Цена метра",
+                     "Причина", "Появилось", "Ушло в архив", "Срок экспозиции, дней"]],
+                width="stretch",
+                hide_index=True,
             )
 
