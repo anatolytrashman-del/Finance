@@ -234,8 +234,7 @@ def table(columns, rows, badge_cols=None, progress_cols=None, raw_cols=None, rig
                 cells.append(f"<td{cls}>{pill(val, colors)}</td>")
             elif key in progress_cols:
                 max_v = progress_cols[key] or 100
-                is_missing = val in (None, "") or val != val  # val != val catches NaN
-                pct = max(0.0, min(100.0, (float(val) / max_v * 100) if max_v and not is_missing else 0.0))
+                pct = max(0.0, min(100.0, (float(val) / max_v * 100) if max_v and val not in (None, "") else 0.0))
                 cells.append(
                     f"<td{cls}><div class='tfo-table-progress'>"
                     f"<div class='tfo-table-progress-track'>"
