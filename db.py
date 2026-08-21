@@ -277,10 +277,11 @@ def load_balance():
         return sum((it["usd"] or 0) for it in by_group.get(group, []))
 
     obligations_total = subtotal("obligations")
-    assets_total = sum(
-        subtotal(g) for g in BALANCE_GROUPS if g not in ("frozen", "obligations")
-    )
-    grand_total = assets_total - obligations_total
+    # Долги в исходной таблице вносились как отрицательные числа (как и в
+    # каждом отдельном обязательстве выше) — поэтому просто складываем все
+    # группы, кроме "заморожено" (оно вне баланса), с их исходными знаками,
+    # а не вычитаем obligations_total отдельно (это удваивало бы долг).
+    grand_total = sum(subtotal(g) for g in BALANCE_GROUPS if g != "frozen")
 
     return {
         "sheet_name": snap["label"] or snap["date"],
