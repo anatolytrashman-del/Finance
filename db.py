@@ -180,6 +180,14 @@ def delete_deal(deal_id):
         conn.execute("DELETE FROM deals WHERE id = ?", (deal_id,))
 
 
+def rename_deal_type(old_type, new_type):
+    """Массово переименовывает «Тип сделки» во всех сделках с точным совпадением
+    (регистр важен) — для разовой чистки данных после миграции."""
+    with _conn() as conn:
+        cur = conn.execute("UPDATE deals SET deal_type = ? WHERE deal_type = ?", (new_type, old_type))
+    return cur.rowcount
+
+
 def _distinct(table, column):
     with _conn() as conn:
         rows = conn.execute(

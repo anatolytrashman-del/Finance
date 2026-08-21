@@ -31,7 +31,7 @@ CATEGORY_COLORS = {
 }
 RENT_MONTHLY = 375.0
 RENT_START = pd.Timestamp(2025, 2, 1)
-RENT_LABEL = "Аренда квартиры"
+RENT_LABEL = "Дивиденды"
 
 
 def _entity(deal_type):
