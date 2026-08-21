@@ -1,6 +1,10 @@
 import streamlit as st
 
+from auth import require_password
+
 st.set_page_config(page_title="Trashman Family Office", page_icon="📊", layout="wide")
+
+require_password()
 
 # Единый шрифт для всего приложения — Montserrat. app.py выполняется при
 # отрисовке каждой страницы (перед nav.run()), поэтому вставка здесь применяет
@@ -64,6 +68,9 @@ documents = st.Page("views/documents.py", title="Архив документов
 ideas = st.Page("views/ideas.py", title="Инвест-идеи", icon="💡")
 finmodel = st.Page("views/finmodel.py", title="Финмодель", icon="🧮")
 market = st.Page("views/market.py", title="Анализ рынка", icon="🏷️")
+data_entry = st.Page("views/data_entry.py", title="Ввод данных", icon="✍️")
 
-nav = st.navigation([dashboard, balance, deals, real_estate, entities, documents, ideas, finmodel, market])
+nav = st.navigation(
+    [dashboard, balance, deals, real_estate, entities, documents, ideas, finmodel, market, data_entry]
+)
 nav.run()

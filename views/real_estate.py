@@ -5,24 +5,19 @@ import pandas as pd
 import streamlit as st
 
 from config import YANDEX_MAPS_API_KEY
-from data_source import load_real_estate, load_real_estate_sold, sidebar_refresh_control
+from db import load_real_estate, load_real_estate_sold
 from parsers import parse_area, parse_money
 from rates_widget import render_sidebar_rates
 from theme import card, kpi_card, kpi_row, page, section_title
 
-sidebar_refresh_control()
 render_sidebar_rates()
 
 df = load_real_estate()
-if df is None:
-    st.title("🏠 Портфолио объектов недвижимости")
-    st.info("Нажми «Обновить данные» в боковой панели, чтобы загрузить таблицу.")
-    st.stop()
-
 if df.empty:
     st.title("🏠 Портфолио объектов недвижимости")
-    st.warning("Лист «Real Estate» пуст или не найден.")
+    st.info("Объектов ещё нет. Добавь первый на странице «Ввод данных».")
     st.stop()
+df = df.drop(columns=["id"])
 
 TYPE_COL = "Тип"
 AREA_COL = "Площадь"
@@ -284,6 +279,7 @@ with page("real_estate", "🏠", "Портфолио объектов недви
     # Проданные объекты — внизу страницы
     sold = load_real_estate_sold()
     if not sold.empty:
+        sold = sold.drop(columns=["id"])
         SALE_COL = "Цена продажи"
         PROFIT_COL = "Прибыль"
         YIELD_COL = "Доходность"

@@ -201,6 +201,21 @@ def _find_latest_snapshot_sheet(wb):
     return wb[best_name] if best_name else None
 
 
+def sheet_sort_key(name: str):
+    """Публичная обёртка над _sheet_sort_key — для миграции (сортировка/даты срезов)."""
+    return _sheet_sort_key(name)
+
+
+def find_all_snapshot_sheets(wb):
+    """Все помесячные срезы (листы вида '1 июля 2026'), в хронологическом порядке —
+    для миграции истории (parse_balance/parse_asset_allocation по умолчанию видят
+    только самый свежий)."""
+    found = [(_sheet_sort_key(name), name) for name in wb.sheetnames]
+    found = [(key, name) for key, name in found if key is not None]
+    found.sort(key=lambda kv: kv[0])
+    return [wb[name] for _, name in found]
+
+
 def _bal_num(v):
     return float(v) if isinstance(v, (int, float)) else None
 
@@ -228,13 +243,14 @@ def _bal_currency(label, orig, usd, eur, rub):
     return ""
 
 
-def parse_balance(wb) -> dict:
-    """Баланс с последнего месячного среза (лист вида «14 июля 2026»).
+def parse_balance(wb, ws=None) -> dict:
+    """Баланс с последнего месячного среза (лист вида «14 июля 2026»), либо с
+    конкретного листа ws (для миграции истории — см. find_all_snapshot_sheets).
 
     Активы читаются из столбцов A/B/C (актив / в валюте / в $), обязательства —
     из G/H/I. Строки ищутся по названию, а не по номеру, чтобы страница не
     ломалась при добавлении/удалении объектов."""
-    ws = _find_latest_snapshot_sheet(wb)
+    ws = ws if ws is not None else _find_latest_snapshot_sheet(wb)
     if ws is None:
         return None
 
@@ -338,10 +354,10 @@ def parse_balance(wb) -> dict:
     }
 
 
-def parse_asset_allocation(wb) -> pd.DataFrame:
+def parse_asset_allocation(wb, ws=None) -> pd.DataFrame:
     """Разбивка капитала по классам активов из таблицы 'Распределение по группам активов'
-    на самом свежем помесячном срезе."""
-    ws = _find_latest_snapshot_sheet(wb)
+    на самом свежем помесячном срезе, либо на конкретном листе ws (миграция истории)."""
+    ws = ws if ws is not None else _find_latest_snapshot_sheet(wb)
     if ws is None:
         return pd.DataFrame(columns=["Категория", "Сумма", "Доля"])
 

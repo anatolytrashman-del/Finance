@@ -1,11 +1,10 @@
+.git
 __pycache__/
 *.pyc
 .venv/
 venv/
 data/cache.xlsx
 .streamlit/secrets.toml
-*.db
-*.db-journal
 market_debug/
 market_debug.zip
 realt_debug/
@@ -18,3 +17,4 @@ bnb_debug/
 bnb_debug.zip
 bir_debug/
 bir_debug.zip
+scouts/

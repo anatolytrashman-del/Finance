@@ -9,12 +9,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from balance_live import recalc_live_totals
-from data_source import load_asset_allocation, load_balance, load_progress, sidebar_refresh_control
+from db import load_asset_allocation, load_balance, load_progress
 from events_store import load_events, save_events
 from rates_store import load_rates as load_bnb_rates
 from rates_widget import render_sidebar_rates
 
-sidebar_refresh_control()
 render_sidebar_rates()
 
 # Графики, к которым можно привязывать события-комментарии
@@ -29,9 +28,9 @@ if "events" not in st.session_state:
     st.session_state["events"] = load_events()
 
 data = load_progress()
-if data is None:
+if all(df.empty for df in data.values()):
     st.title("📊 Дашборд капитала")
-    st.info("Нажми «Обновить данные» в боковой панели, чтобы загрузить таблицу.")
+    st.info("Данных ещё нет. Добавь первую точку капитала на странице «Ввод данных».")
     st.stop()
 capital_usd = data.get("capital_usd", pd.DataFrame())
 capital_rub = data.get("capital_rub", pd.DataFrame())

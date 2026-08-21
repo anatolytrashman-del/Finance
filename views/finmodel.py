@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import config
-from data_source import load_deals, load_real_estate, sidebar_refresh_control
+from db import load_deals, load_real_estate
 from buyrent_finmodel import compute_buyrent
 from finmodel_store import (
     load_buyrent_finmodels,
@@ -24,7 +24,6 @@ from sale_finmodel import (
 )
 from theme import card, kpi_card, kpi_row, page, section_title
 
-sidebar_refresh_control()
 render_sidebar_rates()
 
 TAX_MODES = ["% от аренды", "Фикс. сумма в месяц"]
@@ -305,8 +304,8 @@ with page("finmodel", "🧮", "Финмодель", "Аренда, продаж�
         и дата погашения остатка. Пишет подтянутый график в session_state['{prefix}_prefill']."""
         real_estate = load_real_estate()
         deals = load_deals()
-        if real_estate is None or deals is None:
-            st.info("Чтобы подтянуть объект из реестра, нажми «🔄 Обновить данные» в боковой панели.")
+        if real_estate.empty or deals.empty:
+            st.info("Чтобы подтянуть объект из реестра, сначала добавь его на странице «Ввод данных».")
             return
         with st.expander("🔍 Диагностика связки (что видит приложение)", expanded=False):
             if config.DEALS_OBJECT_COLUMN in deals.columns:
@@ -488,8 +487,8 @@ with page("finmodel", "🧮", "Финмодель", "Аренда, продаж�
     def _buyrent_registry_prefill(prefix):
         real_estate = load_real_estate()
         deals = load_deals()
-        if real_estate is None or deals is None:
-            st.info("Чтобы подтянуть объект из реестра, нажми «🔄 Обновить данные» в боковой панели.")
+        if real_estate.empty or deals.empty:
+            st.info("Чтобы подтянуть объект из реестра, сначала добавь его на странице «Ввод данных».")
             return
         choices = object_choices(real_estate, deals)
         if not choices:

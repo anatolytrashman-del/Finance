@@ -4,21 +4,15 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from data_source import load_real_estate, sidebar_refresh_control
+from db import load_real_estate
 from docs_store import load_documents, save_documents
 from rates_widget import render_sidebar_rates
 from sale_finmodel import object_choices
 from theme import card, page, section_title
 
-sidebar_refresh_control()
 render_sidebar_rates()
 
 real_estate = load_real_estate()
-if real_estate is None:
-    st.title("🗂️ Архив документов")
-    st.info("Нажми «🔄 Обновить данные» в боковой панели, чтобы загрузить список объектов.")
-    st.stop()
-
 choices = object_choices(real_estate)
 if not choices:
     st.title("🗂️ Архив документов")

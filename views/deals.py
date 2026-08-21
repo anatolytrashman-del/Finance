@@ -4,22 +4,17 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from data_source import load_deals, sidebar_refresh_control
+from db import load_deals
 from rates_widget import render_sidebar_rates
 
-sidebar_refresh_control()
 render_sidebar_rates()
 
 df = load_deals()
-if df is None:
-    st.title("📈 Реестр сделок")
-    st.info("Нажми «Обновить данные» в боковой панели, чтобы загрузить таблицу.")
-    st.stop()
-
 if df.empty:
     st.title("📈 Реестр сделок")
-    st.warning("Лист «Сделки» пуст или не найден.")
+    st.info("Сделок ещё нет. Добавь первую на странице «Ввод данных».")
     st.stop()
+df = df.drop(columns=["id"])
 
 DEAL_TYPE_COL = "Тип сделки"
 PROFIT_COL = "Чистая прибыль по сделке"

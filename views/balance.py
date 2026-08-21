@@ -1,17 +1,16 @@
 import pandas as pd
 import streamlit as st
 
-from data_source import load_balance, sidebar_refresh_control
+from db import load_balance
 from rates_widget import render_sidebar_rates
 from theme import card, kpi_card, kpi_row, page, section_title
 
-sidebar_refresh_control()
 render_sidebar_rates()
 
 balance = load_balance()
 if balance is None:
     st.title("⚖️ Баланс")
-    st.info("Нажми «🔄 Обновить данные» в боковой панели, чтобы загрузить таблицу.")
+    st.info("Данных ещё нет. Добавь первый срез баланса на странице «Ввод данных».")
     st.stop()
 
 
