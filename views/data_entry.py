@@ -23,6 +23,18 @@ _MONTHS_RU_GENITIVE = [
 def _fmt_date_ru(d):
     return f"{d.day} {_MONTHS_RU_GENITIVE[d.month - 1]} {d.year}"
 
+
+def _pick_or_new(container, label, options, key):
+    """Селектбокс из уже существующих в базе значений + отдельное поле для
+    нового варианта (побеждает, если заполнено) — так проще выбрать то же
+    самое значение, что уже вносилось раньше, вместо того чтобы каждый раз
+    печатать вручную и получать разнобой ("Покупка"/"покупка")."""
+    picked = container.selectbox(label, ["—"] + options, key=f"{key}_pick")
+    new_value = container.text_input("или впиши новое", key=f"{key}_new", placeholder="если нет в списке выше")
+    if new_value.strip():
+        return new_value.strip()
+    return picked if picked != "—" else None
+
 GROUP_LABELS = {
     "bank": "Банковские счета", "cash": "Наличные", "crypto": "Крипта",
     "returns": "Возвраты", "loans": "Займы", "real_estate": "Недвижимость (в балансе)",
@@ -95,14 +107,14 @@ with page("data_entry", "✍️", "Ввод данных", "Здесь запо�
         section_title("Добавить сделку")
         with st.form("deal_form", clear_on_submit=True):
             d_date = st.date_input("Дата", value=date.today(), key="deal_date")
-            deal_type = st.text_input("Тип сделки", placeholder="Покупка / Продажа / Дивиденды / ...")
+            deal_type = _pick_or_new(st, "Тип сделки", db.distinct_deal_types(), "deal_type")
             amount = st.number_input("Сумма, $", value=0.0, step=50.0)
             c1, c2 = st.columns(2)
-            object_label = c1.text_input("Объект")
-            asset_type = c2.text_input("Вид актива")
+            object_label = _pick_or_new(c1, "Объект", db.distinct_object_labels(), "deal_object")
+            asset_type = _pick_or_new(c2, "Вид актива", db.distinct_asset_types(), "deal_asset_type")
             c3, c4 = st.columns(2)
             purpose = c3.text_input("Назначение")
-            counterparty = c4.text_input("Контрагент")
+            counterparty = _pick_or_new(c4, "Контрагент", db.distinct_counterparties(), "deal_counterparty")
             net_profit = st.number_input("Чистая прибыль по сделке, $ (если применимо)", value=None, step=50.0)
             if st.form_submit_button("Сохранить", type="primary"):
                 db.add_deal(

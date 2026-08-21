@@ -180,6 +180,33 @@ def delete_deal(deal_id):
         conn.execute("DELETE FROM deals WHERE id = ?", (deal_id,))
 
 
+def _distinct(table, column):
+    with _conn() as conn:
+        rows = conn.execute(
+            f"SELECT DISTINCT {column} AS v FROM {table} WHERE {column} IS NOT NULL AND {column} != '' "
+            f"ORDER BY {column}"
+        ).fetchall()
+    return [r["v"] for r in rows]
+
+
+def distinct_deal_types():
+    return _distinct("deals", "deal_type")
+
+
+def distinct_asset_types():
+    return _distinct("deals", "asset_type")
+
+
+def distinct_counterparties():
+    return _distinct("deals", "counterparty")
+
+
+def distinct_object_labels():
+    """Объекты из сделок и из недвижимости вместе — чтобы совпадали (это нужно
+    для связки с финмоделью, см. config.DEALS_OBJECT_COLUMN)."""
+    return sorted(set(_distinct("deals", "object_label")) | set(_distinct("real_estate", "object_label")))
+
+
 # =============================== Недвижимость ===============================
 
 REAL_ESTATE_COLUMNS = {
