@@ -475,3 +475,48 @@ def load_balance_snapshot_full(snapshot_id):
         "items": [dict(it) for it in items],
         "allocation": [dict(a) for a in allocation],
     }
+
+
+# =============================== Починка дублей после первой миграции ===============================
+
+def dedupe_migrated_duplicates():
+    """Разовая (но безопасно повторяемая) починка: первая миграция из Google
+    Таблицы (до появления колонки source) записала все сделки/объекты как
+    source='app'. Первый клик «Обновить данные» после этого не заменял их
+    (заменяется только то, что уже помечено source='sheet'), а добавлял
+    свежую копию — старые и новые строки задваивались.
+
+    Удаляет старую app-копию только там, где у неё есть точный twin среди
+    свежих sheet-строк — значит, это не задвоение случайно совпавших, а
+    ровно тот самый artefact. Ничего, добавленного вручную и не совпадающего
+    с sheet-данными, не трогает. Вызывается автоматически в конце каждой
+    sync_from_sheet() — на чистой базе (без такого пересечения) не делает
+    ничего."""
+    removed = {"real_estate": 0, "deals": 0}
+    with _conn() as conn:
+        re_rows = conn.execute(
+            "SELECT id, status, type, object_label, location, source FROM real_estate"
+        ).fetchall()
+        sheet_re_keys = {
+            (r["status"], r["type"], r["object_label"], r["location"])
+            for r in re_rows if r["source"] == "sheet"
+        }
+        for r in re_rows:
+            key = (r["status"], r["type"], r["object_label"], r["location"])
+            if r["source"] == "app" and key in sheet_re_keys:
+                conn.execute("DELETE FROM real_estate WHERE id = ?", (r["id"],))
+                removed["real_estate"] += 1
+
+        deal_rows = conn.execute(
+            "SELECT id, date, deal_type, amount, object_label, purpose, counterparty, source FROM deals"
+        ).fetchall()
+        sheet_deal_keys = {
+            (r["date"], r["deal_type"], r["amount"], r["object_label"], r["purpose"], r["counterparty"])
+            for r in deal_rows if r["source"] == "sheet"
+        }
+        for r in deal_rows:
+            key = (r["date"], r["deal_type"], r["amount"], r["object_label"], r["purpose"], r["counterparty"])
+            if r["source"] == "app" and key in sheet_deal_keys:
+                conn.execute("DELETE FROM deals WHERE id = ?", (r["id"],))
+                removed["deals"] += 1
+    return removed

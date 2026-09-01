@@ -72,9 +72,10 @@ with st.sidebar:
                     "и что GOOGLE_SHEET_ID в config.py верный."
                 )
             else:
+                dup_note = f" Удалено дублей: {summary['removed_duplicates']}." if summary["removed_duplicates"] else ""
                 st.success(
                     f"Готово: {summary['points']} точек капитала, {summary['deals']} сделок, "
-                    f"{summary['active']} объектов недвижимости, {summary['snapshots']} срезов баланса."
+                    f"{summary['active']} объектов недвижимости, {summary['snapshots']} срезов баланса.{dup_note}"
                 )
     st.caption("Подтягивает свежие сделки, недвижимость и срезы баланса из Google Таблицы.")
 

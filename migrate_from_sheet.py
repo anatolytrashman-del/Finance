@@ -116,12 +116,15 @@ def sync_from_sheet() -> dict:
         )
         snap_n += 1
 
+    removed = db.dedupe_migrated_duplicates()
+
     return {
         "points": points,
         "deals": len(deal_rows),
         "active": len(active_rows),
         "sold": len(sold_rows),
         "snapshots": snap_n,
+        "removed_duplicates": removed["real_estate"] + removed["deals"],
     }
 
 

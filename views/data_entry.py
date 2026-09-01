@@ -126,23 +126,42 @@ with page("data_entry", "✍️", "Ввод данных", "Здесь запо�
                 st.success("Сделка сохранена.")
                 st.rerun()
 
-        section_title("Последние сделки")
+        section_title("Удалить сделку")
         deals = db.load_deals()
         if deals.empty:
             st.caption("Пока пусто.")
         else:
-            recent = deals.sort_values("Дата", ascending=False).head(30)
-            del_id = st.selectbox(
-                "Удалить сделку", recent["id"],
-                format_func=lambda i: f"{recent.loc[recent['id'] == i, 'Дата'].iloc[0].strftime('%d.%m.%Y')} — "
-                                       f"{recent.loc[recent['id'] == i, 'Тип сделки'].iloc[0]} — "
-                                       f"${recent.loc[recent['id'] == i, 'Сумма'].iloc[0]:,.0f}",
-                key="del_deal_id",
+            search = st.text_input(
+                "Поиск (по типу / объекту / назначению / контрагенту)", key="deal_search",
+                placeholder="начни печатать, чтобы отфильтровать список ниже",
             )
-            if st.button("🗑️ Удалить", key="del_deal_btn"):
-                db.delete_deal(del_id)
-                st.rerun()
-            st.dataframe(recent.drop(columns=["id"]), width="stretch", hide_index=True)
+            pool = deals.sort_values("Дата", ascending=False)
+            if search.strip():
+                needle = search.strip().lower()
+                mask = pool.drop(columns=["id"]).apply(
+                    lambda row: needle in " ".join(str(v) for v in row.values).lower(), axis=1
+                )
+                pool = pool[mask]
+            else:
+                pool = pool.head(50)
+                st.caption("Показаны последние 50 — воспользуйся поиском выше, чтобы найти более старую сделку.")
+
+            if pool.empty:
+                st.caption("Ничего не найдено.")
+            else:
+                def _deal_label(i):
+                    row = pool.loc[pool["id"] == i].iloc[0]
+                    date_str = row["Дата"].strftime("%d.%m.%Y")
+                    obj = row.get("Объект") or "—"
+                    purpose = row.get("Назначение") or ""
+                    return f"{date_str} — {row['Тип сделки']} — ${row['Сумма']:,.0f} — {obj} — {purpose}"
+
+                del_id = st.selectbox("Сделка", pool["id"], format_func=_deal_label, key="del_deal_id")
+                if st.button("🗑️ Удалить сделку", key="del_deal_btn"):
+                    db.delete_deal(del_id)
+                    st.success("Сделка удалена.")
+                    st.rerun()
+                st.dataframe(pool.drop(columns=["id"]), width="stretch", hide_index=True)
 
     # ============================ Недвижимость ============================
     with tab_re:
