@@ -187,8 +187,53 @@ with page("data_entry", "✍️", "Ввод данных", "Здесь запо�
                 format_func=lambda i: all_re.loc[all_re["id"] == i, "label"].iloc[0],
                 key="re_manage_id",
             )
-            action = st.radio("Действие", ["Пометить проданным", "Удалить"], horizontal=True, key="re_action")
-            if action == "Пометить проданным":
+            action = st.radio(
+                "Действие", ["Редактировать", "Пометить проданным", "Удалить"], horizontal=True, key="re_action"
+            )
+            if action == "Редактировать":
+                obj = db.get_real_estate(sel_id)
+                with st.form("re_edit_form"):
+                    e_type = st.text_input("Тип", value=obj.get("type") or "")
+                    ec1, ec2 = st.columns(2)
+                    e_location = ec1.text_input("Локация", value=obj.get("location") or "")
+                    e_exact_address = ec2.text_input("Точный адрес", value=obj.get("exact_address") or "")
+                    ec3, ec4 = st.columns(2)
+                    e_object_status = ec3.text_input("Статус", value=obj.get("object_status") or "")
+                    e_coords = ec4.text_input("Координаты", value=obj.get("coords") or "")
+                    ec5, ec6 = st.columns(2)
+                    e_area = ec5.text_input("Площадь", value=obj.get("area") or "")
+                    e_object_label = ec6.text_input("Ярлык объекта", value=obj.get("object_label") or "")
+                    ec7, ec8, ec9 = st.columns(3)
+                    e_purchase = ec7.number_input(
+                        "Сумма покупки, $", value=float(obj.get("purchase_usd") or 0.0), step=500.0
+                    )
+                    e_market = ec8.number_input(
+                        "Рыночная стоимость, $", value=float(obj.get("market_usd") or 0.0), step=500.0
+                    )
+                    e_liabilities = ec9.number_input(
+                        "Обязательства, $", value=float(obj.get("liabilities_usd") or 0.0), step=500.0
+                    )
+                    if obj.get("status") == "sold":
+                        ec10, ec11 = st.columns(2)
+                        e_sale_price = ec10.number_input(
+                            "Цена продажи, $", value=float(obj.get("sale_price_usd") or 0.0), step=500.0
+                        )
+                        e_profit = ec11.number_input(
+                            "Прибыль, $", value=float(obj.get("profit_usd") or 0.0), step=500.0
+                        )
+                    if st.form_submit_button("💾 Сохранить изменения", type="primary"):
+                        fields = dict(
+                            type=e_type or None, location=e_location or None,
+                            exact_address=e_exact_address or None, object_status=e_object_status or None,
+                            coords=e_coords or None, area=e_area or None, object_label=e_object_label or None,
+                            purchase_usd=e_purchase, market_usd=e_market, liabilities_usd=e_liabilities,
+                        )
+                        if obj.get("status") == "sold":
+                            fields.update(sale_price_usd=e_sale_price, profit_usd=e_profit)
+                        db.update_real_estate(sel_id, **fields)
+                        st.success("Изменения сохранены.")
+                        st.rerun()
+            elif action == "Пометить проданным":
                 sale_price = st.number_input("Цена продажи, $", value=0.0, step=500.0, key="re_sale_price")
                 profit = st.number_input("Прибыль, $", value=0.0, step=500.0, key="re_sale_profit")
                 if st.button("Сохранить как проданный", key="re_mark_sold"):

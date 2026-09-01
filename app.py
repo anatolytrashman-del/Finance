@@ -59,6 +59,25 @@ st.markdown(
 
 st.logo("assets/logo.svg", size="large")
 
+with st.sidebar:
+    if st.button("🔄 Обновить данные", key="sync_from_sheet_btn", width="stretch"):
+        with st.spinner("Синхронизирую с Google Таблицей..."):
+            try:
+                from migrate_from_sheet import sync_from_sheet
+                summary = sync_from_sheet()
+            except Exception:  # noqa: BLE001
+                st.error(
+                    "Не удалось скачать Google Таблицу. Проверь: доступ по ссылке "
+                    "(«Все, у кого есть ссылка» → Читатель), интернет-соединение, "
+                    "и что GOOGLE_SHEET_ID в config.py верный."
+                )
+            else:
+                st.success(
+                    f"Готово: {summary['points']} точек капитала, {summary['deals']} сделок, "
+                    f"{summary['active']} объектов недвижимости, {summary['snapshots']} срезов баланса."
+                )
+    st.caption("Подтягивает свежие сделки, недвижимость и срезы баланса из Google Таблицы.")
+
 dashboard = st.Page("views/dashboard.py", title="Дашборды", icon="📊", default=True)
 balance = st.Page("views/balance.py", title="Баланс", icon="⚖️")
 deals = st.Page("views/deals.py", title="Сделки", icon="📈")

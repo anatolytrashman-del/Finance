@@ -1,19 +1,19 @@
-"""Разовый перенос истории из Google Таблицы в локальную базу (db.py).
+"""Синхронизация локальной базы (db.py) с Google Таблицей.
 
-Запускать ОДИН РАЗ, локально — там, где таблица ещё доступна по ссылке
-(на сервере в облаке Google обычно недоступен). После переноса приложение
-больше не обращается к Google вообще.
+Можно гонять сколько угодно раз — безопасно для повторного запуска:
+  - прогресс капитала и помесячные срезы баланса — upsert по дате;
+  - сделки и объекты недвижимости, ранее пришедшие из таблицы, полностью
+    заменяются свежим набором (db.replace_sheet_*) — так повторный запуск
+    не плодит дубли. Сделки/объекты, добавленные прямо в приложении (не из
+    таблицы), эта замена не трогает.
+
+Как отдельный скрипт (например, чтобы разово перенести историю на новую
+машину, где ещё нет БД, — сервер в облаке обычно не видит Google):
 
     python3 migrate_from_sheet.py
 
-Итоговый файл — ~/.trashman_family_office/family_office.db. Дальше его нужно
-залить на сервер (см. README «Деплой» — команда fly sftp shell / volume).
-
-Скрипт идемпотентен для баланса (upsert по дате среза) и для точек капитала
-(upsert по дате+метрике), но сделки и объекты недвижимости просто
-добавляются — повторный запуск на той же базе даст дубли. Если нужно
-перезапустить с нуля, удали family_office.db перед повторным запуском.
-"""
+Внутри приложения та же логика доступна кнопкой «Обновить данные» в
+боковой панели (см. app.py) — вызывает sync_from_sheet() напрямую."""
 import sys
 from io import BytesIO
 
@@ -25,18 +25,14 @@ import parsers
 from data_source import _fetch_bytes
 
 
-def main():
-    print("Скачиваю Google Таблицу...")
-    try:
-        raw = _fetch_bytes()
-    except Exception as exc:  # noqa: BLE001
-        print(f"Не удалось скачать таблицу: {exc}", file=sys.stderr)
-        print("Проверь доступ («Все, у кого есть ссылка» -> Читатель) и GOOGLE_SHEET_ID в config.py.")
-        sys.exit(1)
-
+def sync_from_sheet() -> dict:
+    """Скачивает Google Таблицу и синхронизирует с ней локальную базу.
+    Возвращает сводку {"points": N, "deals": N, "active": N, "sold": N, "snapshots": N}.
+    Бросает исключение, если таблицу не удалось скачать/разобрать."""
+    raw = _fetch_bytes()
     wb = load_workbook(BytesIO(raw), data_only=True)
 
-    # --- Прогресс капитала ---
+    # --- Прогресс капитала (upsert по дате+метрике) ---
     progress = parsers.parse_progress(wb)
     points = 0
     for metric, series in progress.items():
@@ -44,35 +40,32 @@ def main():
             date_str = row["date"].strftime("%Y-%m-%d")
             db.add_capital_point(date_str, {metric: row["value"]})
             points += 1
-    print(f"Прогресс капитала: {points} точек")
 
-    # --- Сделки ---
+    # --- Сделки (полная замена ранее синхронизированных из таблицы) ---
     deals_df = parsers.parse_deals(wb)
-    deals_n = 0
+    deal_rows = []
     for _, row in deals_df.iterrows():
         date_val = row.get("Дата")
         if date_val is None or pd.isna(date_val):
             continue
         date_str = date_val.strftime("%Y-%m-%d") if hasattr(date_val, "strftime") else str(date_val)
-        db.add_deal(
-            date_str=date_str,
-            deal_type=row.get("Тип сделки"),
-            amount=row.get("Сумма"),
-            object_label=row.get("Объект"),
-            purpose=row.get("Назначение"),
-            counterparty=row.get("Контрагент"),
-            asset_type=row.get("Вид актива"),
-            net_profit=row.get("Чистая прибыль по сделке"),
-        )
-        deals_n += 1
-    print(f"Сделки: {deals_n}")
+        deal_rows.append({
+            "date_str": date_str,
+            "deal_type": row.get("Тип сделки"),
+            "amount": row.get("Сумма"),
+            "object_label": row.get("Объект"),
+            "purpose": row.get("Назначение"),
+            "counterparty": row.get("Контрагент"),
+            "asset_type": row.get("Вид актива"),
+            "net_profit": row.get("Чистая прибыль по сделке"),
+        })
+    db.replace_sheet_deals(deal_rows)
 
-    # --- Недвижимость (активные + проданные) ---
-    def _import_real_estate(re_df, status, extra_cols=None):
-        n = 0
+    # --- Недвижимость (полная замена ранее синхронизированной из таблицы) ---
+    def _rows_from_df(re_df, extra_cols=False):
+        rows = []
         for _, row in re_df.iterrows():
             fields = {
-                "status": status,
                 "type": row.get("Тип"),
                 "object_label": row.get("Объект"),
                 "location": row.get("Локация"),
@@ -88,15 +81,14 @@ def main():
                 fields["sale_price_usd"] = parsers.parse_money(row.get("Цена продажи"))
                 fields["profit_usd"] = parsers.parse_money(row.get("Прибыль"))
             fields = {k: v for k, v in fields.items() if v is not None and v == v}  # drop NaN/None
-            db.add_real_estate(**fields)
-            n += 1
-        return n
+            rows.append(fields)
+        return rows
 
-    active_n = _import_real_estate(parsers.parse_real_estate(wb), "active")
-    sold_n = _import_real_estate(parsers.parse_real_estate_sold(wb), "sold", extra_cols=True)
-    print(f"Недвижимость: {active_n} активных, {sold_n} проданных")
+    active_rows = _rows_from_df(parsers.parse_real_estate(wb))
+    sold_rows = _rows_from_df(parsers.parse_real_estate_sold(wb), extra_cols=True)
+    db.replace_sheet_real_estate(active_rows, sold_rows)
 
-    # --- Баланс: ВСЕ помесячные срезы (не только последний — на будущее) ---
+    # --- Баланс: ВСЕ помесячные срезы (не только последний — на будущее), upsert по дате ---
     snapshot_sheets = parsers.find_all_snapshot_sheets(wb)
     snap_n = 0
     for ws in snapshot_sheets:
@@ -123,8 +115,29 @@ def main():
             allocation=allocation,
         )
         snap_n += 1
-    print(f"Помесячные срезы баланса: {snap_n}")
 
+    return {
+        "points": points,
+        "deals": len(deal_rows),
+        "active": len(active_rows),
+        "sold": len(sold_rows),
+        "snapshots": snap_n,
+    }
+
+
+def main():
+    print("Скачиваю Google Таблицу...")
+    try:
+        summary = sync_from_sheet()
+    except Exception as exc:  # noqa: BLE001
+        print(f"Не удалось синхронизировать: {exc}", file=sys.stderr)
+        print("Проверь доступ («Все, у кого есть ссылка» -> Читатель) и GOOGLE_SHEET_ID в config.py.")
+        sys.exit(1)
+
+    print(f"Прогресс капитала: {summary['points']} точек")
+    print(f"Сделки: {summary['deals']}")
+    print(f"Недвижимость: {summary['active']} активных, {summary['sold']} проданных")
+    print(f"Помесячные срезы баланса: {summary['snapshots']}")
     print(f"\nГотово. База: {db.DB_PATH}")
 
 
